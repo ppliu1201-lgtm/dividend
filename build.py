@@ -396,13 +396,18 @@ def build_stock(s, cfg, fx):
     yh_full = yield_history(h)
     win_years = float(s.get("hist_years") or d.get("hist_years", 10))   # 分位用最近几年（“换挡”的股票用 5 年）
     # 自动识别“近几年才改成高分红”的股票（如东阿阿胶、云天化）：
-    # 分位只从“近12月分红一直不低于现在的 40%”那段开始算，避免拿以前不分红的年份来比
+    # 分位只从“近 18 个月平均分红一直不低于现在的 25%”那段开始算，避免拿以前不分红的年份来比
     regime = False
     if dps > 0 and yh_full:
         dd_, dv_ = [x for x, _ in h["divs"]], [v for _, v in h["divs"]]
         cut = 0
+        # 用近 18 个月分红 × 2/3 判断（派息日每年前后差几周时，近 12 月会短暂少算一次，不能当成“分红变少”）
+        def avg18(x):
+            lo = (date.fromisoformat(x) - timedelta(days=548)).isoformat()
+            return sum(v for dx, v in zip(dd_, dv_) if lo < dx <= x) * 365 / 548
+        first = date.fromisoformat(h["dates"][0]) + timedelta(days=548)
         for i, (x, _) in enumerate(yh_full):
-            if ttm_div(dd_, dv_, x) < 0.4 * dps:
+            if date.fromisoformat(x) >= first and avg18(x) < 0.25 * dps:
                 cut = i + 1
         auto_years = (len(yh_full) - cut) / 52
         if cut and auto_years < win_years:
