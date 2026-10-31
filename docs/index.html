@@ -1029,7 +1029,7 @@ function render(){
   migratePlans();
   ALLOC = computeAlloc();
   const v = {board:viewBoard, low:viewLow, swing:viewSwing, plan:viewPlan, alloc:viewAlloc, review:viewReview}[TAB]();
-  const err = DATA.errors && DATA.errors.length ? `<div class="err">以下股票今天获取失败：${DATA.errors.map(esc).join("；")}</div>` : "";
+  const err = DATA.errors && DATA.errors.length ? `<div class="err">以下股票今天获取失败：${DATA.errors.map(x=>esc(String(x).split("：")[0])).join("；")}</div>` : "";
   $("#app").innerHTML = err + v + `<div class="note">股息率为税后口径；买卖区按每只股票过去 10 年自己的股息率分布划分（高 20% 买入、低 20% 减仓）。仅为纪律提醒，不构成投资建议。</div>`;
 }
 function setTab(t){
