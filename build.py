@@ -14,6 +14,7 @@ import json
 import os
 import random
 import smtplib
+import time
 from bisect import bisect_right
 from datetime import date, datetime, timedelta, timezone
 from email.mime.text import MIMEText
@@ -42,34 +43,83 @@ def history(code, market):
     start = (date.today() - timedelta(days=365 * YEARS + 30)).strftime("%Y%m%d")
     end = date.today().strftime("%Y%m%d")
     if market == "SG":
-        import yfinance as yf
-
-        df = yf.Ticker(code + ".SI").history(start=f"{start[:4]}-{start[4:6]}-{start[6:]}", auto_adjust=False, actions=True)
-        df = df.dropna(subset=["Close"])
-        dates = [d.strftime("%Y-%m-%d") for d in df.index]
-        raw = [float(x) for x in df["Close"]]
-        adj = [float(x) for x in df["Adj Close"]]
-        k = raw[-1] / adj[-1]
-        adj = [x * k for x in adj]
-        divs = [(d.strftime("%Y-%m-%d"), float(v)) for d, v in zip(df.index, df["Dividends"]) if v and v > 0]
+        dates, raw, adj, divs = yf_history(code + ".SI", start)
     else:
-        import akshare as ak
-
-        fn = ak.stock_zh_a_hist if market == "A" else ak.stock_hk_hist
-        r = fn(symbol=code, period="daily", start_date=start, end_date=end, adjust="")
-        h = fn(symbol=code, period="daily", start_date=start, end_date=end, adjust="hfq")
-        hm = {str(d)[:10]: float(c) for d, c in zip(h["日期"], h["收盘"])}
-        dates, raw, hfq = [], [], []
-        for d, c in zip(r["日期"], r["收盘"]):
-            d = str(d)[:10]
-            if d in hm and float(c) > 0:
-                dates.append(d), raw.append(float(c)), hfq.append(hm[d])
-        k = raw[-1] / hfq[-1]
-        adj = [x * k for x in hfq]
-        divs = divs_from_factor(dates, raw, hfq)
+        # 东方财富接口在海外服务器上经常被限流：依次试 东方财富(重试) → 新浪 → Yahoo
+        errs = []
+        for name, fn in (("东财", lambda: em_history(code, market, start, end)),
+                         ("东财重试", lambda: (time.sleep(3), em_history(code, market, start, end))[1]),
+                         ("新浪", lambda: sina_history(code, market, start)),
+                         ("Yahoo", lambda: yf_history(yf_symbol(code, market), start))):
+            try:
+                dates, raw, adj, divs = fn()
+                if len(dates) > 200:
+                    break
+                errs.append(f"{name}: 数据太少")
+            except Exception as e:
+                errs.append(f"{name}: {type(e).__name__} {str(e)[:80]}")
+        else:
+            raise RuntimeError(" | ".join(errs))
     # 涨跌幅用复权价算（除权日不显示成大跌）
     chg = [0.0] + [(adj[i] / adj[i - 1] - 1) * 100 for i in range(1, len(adj))]
     return {"dates": dates, "raw": raw, "adj": adj, "chg": chg, "divs": divs}
+
+
+def yf_symbol(code, market):
+    if market == "HK":
+        return f"{int(code):04d}.HK"
+    return code + (".SS" if code.startswith(("6", "9")) else ".SZ")
+
+
+def yf_history(sym, start):
+    import yfinance as yf
+
+    df = yf.Ticker(sym).history(start=f"{start[:4]}-{start[4:6]}-{start[6:]}", auto_adjust=False, actions=True)
+    df = df.dropna(subset=["Close"])
+    dates = [d.strftime("%Y-%m-%d") for d in df.index]
+    raw = [float(x) for x in df["Close"]]
+    adj = [float(x) for x in df["Adj Close"]]
+    k = raw[-1] / adj[-1]
+    adj = [x * k for x in adj]
+    divs = [(d.strftime("%Y-%m-%d"), float(v)) for d, v in zip(df.index, df["Dividends"]) if v and v > 0]
+    return dates, raw, adj, divs
+
+
+def _merge_raw_hfq(pairs_raw, pairs_hfq):
+    hm = {d: c for d, c in pairs_hfq}
+    dates, raw, hfq = [], [], []
+    for d, c in pairs_raw:
+        if d in hm and c > 0:
+            dates.append(d), raw.append(c), hfq.append(hm[d])
+    k = raw[-1] / hfq[-1]
+    return dates, raw, [x * k for x in hfq], divs_from_factor(dates, raw, hfq)
+
+
+def em_history(code, market, start, end):
+    import akshare as ak
+
+    fn = ak.stock_zh_a_hist if market == "A" else ak.stock_hk_hist
+    r = fn(symbol=code, period="daily", start_date=start, end_date=end, adjust="")
+    h = fn(symbol=code, period="daily", start_date=start, end_date=end, adjust="hfq")
+    return _merge_raw_hfq([(str(d)[:10], float(c)) for d, c in zip(r["日期"], r["收盘"])],
+                          [(str(d)[:10], float(c)) for d, c in zip(h["日期"], h["收盘"])])
+
+
+def sina_history(code, market, start):
+    import akshare as ak
+
+    if market == "A":
+        sym = ("sh" if code.startswith(("6", "9")) else "sz") + code
+        end = date.today().strftime("%Y%m%d")
+        r = ak.stock_zh_a_daily(symbol=sym, start_date=start, end_date=end, adjust="")
+        h = ak.stock_zh_a_daily(symbol=sym, start_date=start, end_date=end, adjust="hfq")
+    else:
+        r = ak.stock_hk_daily(symbol=code, adjust="")
+        h = ak.stock_hk_daily(symbol=code, adjust="hfq")
+    s0 = f"{start[:4]}-{start[4:6]}-{start[6:]}"
+    pr = [(str(d)[:10], float(c)) for d, c in zip(r["date"], r["close"]) if str(d)[:10] >= s0]
+    ph = [(str(d)[:10], float(c)) for d, c in zip(h["date"], h["close"]) if str(d)[:10] >= s0]
+    return _merge_raw_hfq(pr, ph)
 
 
 def divs_from_factor(dates, raw, hfq):
@@ -571,8 +621,10 @@ def main():
         try:
             stocks.append(build_stock(s, cfg, fx))
             print("ok", s["market"], s["code"], s["name"])
+            if s["market"] != "SG":
+                time.sleep(0.5)          # 放慢一点，减少被行情接口限流
         except Exception as e:
-            errors.append(f"{s['name']}({s['code']})")
+            errors.append(f"{s['name']}({s['code']})：{str(e)[:300]}")
             print("失败", s["code"], repr(e))
     if not stocks:
         raise SystemExit("全部获取失败")
@@ -595,7 +647,7 @@ def main():
         return
     html, n = mail_html(data)
     if errors:
-        html += "<p style='color:#c00'>获取失败：" + "；".join(errors) + "</p>"
+        html += "<p style='color:#c00'>获取失败：" + "；".join(x.split("：")[0] for x in errors) + "</p>"
     if n or os.getenv("ALWAYS_SEND"):
         send_mail(f"【红利提醒】{latest} {n} 只有信号" if n else f"【红利日报】{latest} 无信号", html)
 
