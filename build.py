@@ -59,7 +59,7 @@ def history(code, market):
                 dates, raw, adj, divs = fn()
                 if len(dates) <= 200:
                     errs.append(f"{name}: 数据太少"); continue
-                ttm = ttm_div([x for x, _ in divs], [v for _, v in divs], dates[-1])
+                ttm = ttm_div_raw([x for x, _ in divs], [v for _, v in divs], dates[-1])
                 if ttm / raw[-1] > 0.15:            # 股息率超过 15% 基本是数据错了，换下一个来源
                     errs.append(f"{name}: 分红数据异常（近12月 {ttm:.3g}，股价 {raw[-1]:.3g}）"); continue
                 src = name
@@ -280,7 +280,37 @@ def zone(price, b):
 
 
 def ttm_div(divs_dates, divs_vals, d):
-    """d 当日（含）往前 365 天的分红合计。"""
+    """近 12 个月分红，按派息次数校正派息日漂移：
+    - 近 365 天的派息次数 比 前一个 365 天 多（且超过 2 次）→ 去掉最早的几次
+      （例：半年派一次的信托，今年派息日比去年早几天，窗口里会出现 3 次；银行把末期派息提前，也会出现 3 次）
+    - 比前一年少 → 补上 400 天内最近的几次（例：今年中期还没派、去年同期已派）
+    公司从“一年一次”改成“一年两次”的（如招行）不受影响。"""
+    dlo = date.fromisoformat(d)
+    lo, plo, lim = ((dlo - timedelta(days=n)).isoformat() for n in (365, 730, 400))
+    i1 = bisect_right(divs_dates, d)
+    ilo = bisect_right(divs_dates, lo)
+    iplo = bisect_right(divs_dates, plo)
+    cur = list(range(ilo, i1))
+    pn = ilo - iplo
+    if pn and len(cur) > max(pn, 2):
+        # 只有窗口里最早和最晚两次相隔接近一年（同一期分红出现了两次）才去掉；
+        # 信托提前派的“预付分红”（如 CICT 增发前的 advanced distribution）间隔短，不去掉
+        gaps = sorted(g for g in ((date.fromisoformat(divs_dates[k]) - date.fromisoformat(divs_dates[k - 1])).days
+                                  for k in range(max(1, i1 - 8), i1)) if g >= 30)
+        gap = gaps[len(gaps) // 2] if gaps else 180
+        while len(cur) > max(pn, 2) and \
+                (date.fromisoformat(divs_dates[cur[-1]]) - date.fromisoformat(divs_dates[cur[0]])).days >= 365 - 0.5 * gap:
+            cur.pop(0)
+    elif pn and len(cur) < pn:
+        j = ilo - 1
+        while j >= 0 and divs_dates[j] > lim and len(cur) < pn:
+            cur.insert(0, j)
+            j -= 1
+    return sum(divs_vals[i] for i in cur)
+
+
+def ttm_div_raw(divs_dates, divs_vals, d):
+    """d 当日（含）往前 365 天的分红合计（不校正）。"""
     lo = (date.fromisoformat(d) - timedelta(days=365)).isoformat()
     i1 = bisect_right(divs_dates, d)
     total, i = 0.0, i1 - 1
@@ -578,7 +608,7 @@ def build_stock(s, cfg, fx):
         "grid": grid, "plan": plan_out, "signals": sig, "alerts": alert, "status": status, "star": star,
         "val": val, "spark": [round(c, 4) for c in h["adj"][-60:]],
         "yhist": [[x, round(y, 2)] for i, (x, y) in enumerate(yh_full) if i % stepf == 0 or i == len(yh_full) - 1],
-        "divs_recent": [[x, round(v, 4)] for x, v in h["divs"][-6:]],
+        "divs_recent": [[x, round(v, 4)] for x, v in h["divs"][-12:]],
         "swing": sw, "roll": roll, "ma250": round(ma250, 4) if ma250 else None,
         "below250": bool(ma250 and price < ma250), "rating": s.get("rating"),
     }
