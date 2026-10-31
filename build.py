@@ -44,25 +44,33 @@ def history(code, market):
     end = date.today().strftime("%Y%m%d")
     if market == "SG":
         dates, raw, adj, divs = yf_history(code + ".SI", start)
+        src = "Yahoo"
     else:
         # 东方财富接口在海外服务器上经常被限流：依次试 东方财富(重试) → 新浪 → Yahoo
+        # 港股的新浪复权数据推算分红不准，港股优先用 Yahoo（直接给分红记录）
         errs = []
-        for name, fn in (("东财", lambda: em_history(code, market, start, end)),
-                         ("东财重试", lambda: (time.sleep(3), em_history(code, market, start, end))[1]),
-                         ("新浪", lambda: sina_history(code, market, start)),
-                         ("Yahoo", lambda: yf_history(yf_symbol(code, market), start))):
+        srcs = [("东财", lambda: em_history(code, market, start, end)),
+                ("东财重试", lambda: (time.sleep(3), em_history(code, market, start, end))[1])]
+        alt = [("新浪", lambda: sina_history(code, market, start)),
+               ("Yahoo", lambda: yf_history(yf_symbol(code, market), start))]
+        srcs += alt[::-1] if market == "HK" else alt
+        for name, fn in srcs:
             try:
                 dates, raw, adj, divs = fn()
-                if len(dates) > 200:
-                    break
-                errs.append(f"{name}: 数据太少")
+                if len(dates) <= 200:
+                    errs.append(f"{name}: 数据太少"); continue
+                ttm = ttm_div([x for x, _ in divs], [v for _, v in divs], dates[-1])
+                if ttm / raw[-1] > 0.15:            # 股息率超过 15% 基本是数据错了，换下一个来源
+                    errs.append(f"{name}: 分红数据异常（近12月 {ttm:.3g}，股价 {raw[-1]:.3g}）"); continue
+                src = name
+                break
             except Exception as e:
                 errs.append(f"{name}: {type(e).__name__} {str(e)[:80]}")
         else:
             raise RuntimeError(" | ".join(errs))
     # 涨跌幅用复权价算（除权日不显示成大跌）
     chg = [0.0] + [(adj[i] / adj[i - 1] - 1) * 100 for i in range(1, len(adj))]
-    return {"dates": dates, "raw": raw, "adj": adj, "chg": chg, "divs": divs}
+    return {"dates": dates, "raw": raw, "adj": adj, "chg": chg, "divs": divs, "src": src}
 
 
 def yf_symbol(code, market):
@@ -387,6 +395,18 @@ def build_stock(s, cfg, fx):
     # ---- 历史股息率分位 ----
     yh_full = yield_history(h)
     win_years = float(s.get("hist_years") or d.get("hist_years", 10))   # 分位用最近几年（“换挡”的股票用 5 年）
+    # 自动识别“近几年才改成高分红”的股票（如东阿阿胶、云天化）：
+    # 分位只从“近12月分红一直不低于现在的 40%”那段开始算，避免拿以前不分红的年份来比
+    regime = False
+    if dps > 0 and yh_full:
+        dd_, dv_ = [x for x, _ in h["divs"]], [v for _, v in h["divs"]]
+        cut = 0
+        for i, (x, _) in enumerate(yh_full):
+            if ttm_div(dd_, dv_, x) < 0.4 * dps:
+                cut = i + 1
+        auto_years = (len(yh_full) - cut) / 52
+        if cut and auto_years < win_years:
+            win_years, regime = round(max(auto_years, 0.1), 1), True
     yh = yh_full[-int(win_years * 52):]
     hist_years = len(yh) / 52
     sv = sorted(y for _, y in yh)
@@ -542,7 +562,7 @@ def build_stock(s, cfg, fx):
         "qccy": qccy, "fx": fx[qccy],
         "dps": round(dps, 4), "dps_src": dps_src, "ttm": round(ttm, 4), "tax": tax, "dps_net": round(dps_net, 4),
         "yield": round(yn, 2) if yn is not None else None, "yield_gross": round(yg, 2) if yg is not None else None,
-        "mode": mode, "ypct": ypct, "ypct5": ypct5, "hist_years": round(hist_years, 1), "win_years": win_years,
+        "mode": mode, "ypct": ypct, "ypct5": ypct5, "hist_years": round(hist_years, 1), "win_years": win_years, "regime": regime, "src": h.get("src"),
         "wbreak": bool(b_w and price < b_w[0]),
         "y_buy": round(y_buy, 2) if y_buy else None, "y_sell": round(y_sell, 2) if y_sell else None,
         "y_med": round(y_med, 2) if y_med else None,

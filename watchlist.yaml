@@ -116,6 +116,7 @@ stocks:
   # pair = 对应 A股代码，看板会显示 AH 溢价和哪边税后更划算
   - {code: "00941", market: HK, name: 中国移动,   sector: 电信, pair: "600941", lot: 500, hist_years: 5}
   - {code: "00728", market: HK, name: 中国电信H,  sector: 电信, pair: "601728", lot: 2000, rating: "B"}
+  - {code: "06690", market: HK, name: 海尔智家H, sector: 家电, pair: "600690", lot: 200, rating: "B"}
   - {code: "02318", market: HK, name: 中国平安H,  sector: 保险, pair: "601318", lot: 500, hist_years: 5, rating: "A+"}
   - {code: "00939", market: HK, name: 建设银行H,  sector: 银行, pair: "601939", lot: 1000}
   - {code: "01398", market: HK, name: 工商银行H,  sector: 银行, pair: "601398", lot: 1000}
@@ -136,7 +137,8 @@ stocks:
   - {code: "601336", market: A, name: 新华保险, sector: 保险, hist_years: 5}
   - {code: "000333", market: A, name: 美的集团, sector: 家电, plan: {yield_ge: 5.5}}
   - {code: "000651", market: A, name: 格力电器, sector: 家电, rating: "B"}
-  - {code: "000423", market: A, name: 东阿阿胶, sector: 医药, plan: {yield_ge: 6.0}}
+  - {code: "000423", market: A, name: 东阿阿胶, sector: 医药, plan: {yield_ge: 6.0}, rating: "A+"}
+  - {code: "600461", market: A, name: 洪城环境, sector: 水务, rating: "A-"}
   - {code: "000538", market: A, name: 云南白药, sector: 医药, plan: {price_le: 47.27}}
   - {code: "600750", market: A, name: 华润江中, sector: 医药}
   - {code: "600132", market: A, name: 重庆啤酒, sector: 食品饮料, rating: "B"}
