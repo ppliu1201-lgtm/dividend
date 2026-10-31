@@ -1,0 +1,170 @@
+# ================= 三地红利看板 · 观察清单 =================
+# 每只股票的字段（只有 code / market / name / sector 必填）：
+#   code    : A股 6 位（600036）；港股 5 位（00941）；新加坡 SGX 代码（D05）
+#   market  : A / HK / SG
+#   sector  : 行业，用于行业占比和集中度检查
+#   bucket  : 归入哪部分仓位（不填按 market：A股 / 港股 / 新加坡）
+#   dps     : 每股年分红（税前，可选）。不填 = 自动用“近 12 个月实际分红”
+#             预计今年分红会变时手动填（比如利润下滑），dps_ccy 写币种
+#   tax     : 股息税率 %（可选，不填按 defaults）
+#   pair    : 港股 H 股填对应 A 股代码，显示 AH 溢价
+#   plan    : 计划触发（可选）price_le 现价≤X ；yield_ge 税后股息率≥Y
+#   lot     : 每手股数（港股每只不同，填了建议股数会按手取整；新加坡、A股默认 100）
+#   rating  : 公司评级（借鉴吴富贵）：A+ 有分红+业绩涨 / A- 有分红+业绩横盘 / B 有分红+业绩跌 / B- 有分红+业绩差
+#             计划占比自动调整：A+ ×1.2 / A- 不变 / B、B- 减半；B 及以下跌破 250 日线时暂停第 2、3 档。季报后更新（网页上也能临时改）
+#   tag     : 标签，显示在名字旁边（比如“周期”：利润随商品价格大起大落，分红也会跟着变，仓位要小）
+#
+# 买卖区规则（默认）：
+#   用每只股票过去 10 年的股息率分布 ——
+#   当前股息率处于自己历史的高 20%（≥80 分位）= 买入区；低 20%（≤20 分位）= 减仓区
+#   历史不足 3 年的股票，改用下面固定的 buy_yield / sell_yield（税后）
+
+defaults:
+  hist_years: 10       # 算分位用最近几年；估值体系 2021 年前后“换挡”的股票在该行写 hist_years: 5
+  buy_pct: 80          # 股息率历史分位 ≥ 80 为买入区（分批：第1档=中位数，第2档=80分位，第3档=90分位）
+  sell_pct: 20         # 股息率历史分位 ≤ 20 为减仓区
+  floor_net: 4.5       # 股息率底线：第1档税后股息率不低于此值（借鉴吴富贵“5% 起买”，这里取 4.5 兼顾新加坡、香港本地股）
+  roll_min_net: 5.0    # 滚动（波段仓）要求税后股息率 ≥ 5%
+  roll_holding: []     # 正在做滚动波段的股票代码，例如 ["00728", "D05"]。第二笔 / 卖出 / 止损邮件只发给这些（看板“波段”页会列出该填的代码）
+  buy_yield: 5.0       # 历史不足时的备用规则（税后）
+  sell_yield: 4.0
+  boll_near_pct: 3.0   # 距周线布林下轨 ≤ 3% 算低位
+  tax_a: 0             # A股在内地账户（东方财富）长期持有 >1 年：0%（1个月-1年 10%）
+  tax_hk: 10           # H股 / 红筹（新加坡券商）
+  tax_sg: 0            # 新加坡股票和 REIT：0
+
+  # 波段（区间高抛低吸），只用于“波段仓”，底仓仍按股息率网格
+  swing:
+    enabled: true
+    sleeve: 30            # 波段仓占该股计划仓位 %
+    windows: [160, 120, 90, 60]   # 识别区间时依次尝试的交易日长度，取最长满足的
+    min_width: 8          # 区间宽度 % 下限（太窄扣完费用没空间）
+    max_width: 30         # 上限（太宽就不是横盘）
+    max_bandwidth: 20     # 周线布林带宽度 % 上限
+    zone_pct: 20          # 区间下 20% 为波段买入区，上 20% 为卖出区
+    stop_pct: 1.5         # 收盘跌破下沿 1.5% 止损；突破上沿 1.5% 停止波段
+    fee_roundtrip: 0.4    # 一买一卖费用 %
+  # 某只股票想手动画区间：在那一行加 swing_box: {lo: 4.05, hi: 4.85}
+  # 某只股票不做波段：在那一行加 swing: false
+
+# 目标仓位（%），网页“配置”页可以改，改了只存在你的浏览器
+targets:
+  现金: 15
+  新加坡: 50
+  港股: 35
+  A股: 0     # A股用内地账户的另一笔资金，不计入这 10 万新币
+
+# 集中度上限（%）
+limits:
+  stock: 15
+  sector: 35
+  cash_min: 8          # 第 2、3 档可以动用现金垫，但新币账户现金最少留 8%
+
+# ================= 股票池选股标准 =================
+# 1. 大中盘、成交活跃，买卖不难
+# 2. 连续派息：公司 ≥ 8 年、REIT ≥ 5 年；近 5 年没有大幅削减分红（周期股除外，已标“周期”）
+# 3. 分红可持续：非 REIT 派息比例一般 ≤ 80%；REIT 负债率 ≤ 约 40%
+# 4. 行业分散：每个行业 2–4 只备选，复盘时按“股息率分位 + 周线位置”在同行业里挑最便宜的
+# 5. 不收：内房开发商、高负债小盘股、已退市/私有化的（如恒生银行，2026-01 已退市）
+# 这是观察池，不是买入清单：只有进入买入区、并且分红没有问题的，才按分批计划买
+
+stocks:
+  # ================= 新加坡（0 税，新币）=================
+  # 银行
+  - {code: "D05",  market: SG, name: 星展银行 DBS,  sector: 银行}
+  - {code: "O39",  market: SG, name: 华侨银行 OCBC, sector: 银行}
+  - {code: "U11",  market: SG, name: 大华银行 UOB,  sector: 银行}
+  # 电信 / 基础设施
+  - {code: "Z74",  market: SG, name: 新加坡电信 Singtel, sector: 电信}
+  - {code: "CJLU", market: SG, name: 新网信托 NetLink,   sector: 电信基建}
+  # 工业 / 公用事业 / 服务
+  - {code: "S63",  market: SG, name: 新科工程 ST Eng,     sector: 工业}
+  - {code: "BN4",  market: SG, name: 吉宝 Keppel,         sector: 工业}
+  - {code: "U96",  market: SG, name: 胜科工业 Sembcorp,   sector: 公用事业}
+  - {code: "S68",  market: SG, name: 新加坡交易所 SGX,    sector: 金融服务}
+  - {code: "C52",  market: SG, name: 康福德高 ComfortDelGro, sector: 交通基建}
+  - {code: "V03",  market: SG, name: 万达 Venture,        sector: 制造}
+  # 消费
+  - {code: "OV8",  market: SG, name: 昇菘超市 Sheng Siong, sector: 消费}
+  - {code: "G13",  market: SG, name: 云顶新加坡 Genting SG, sector: 消费}
+  - {code: "F34",  market: SG, name: 丰益国际 Wilmar,      sector: 消费, tag: 周期}
+  # REIT（商场 / 工业 / 物流 / 数据中心 / 医疗 / 酒店）
+  - {code: "C38U", market: SG, name: 凯德综合商业信托 CICT, sector: 房地产信托}
+  - {code: "J69U", market: SG, name: 辉盛商业信托 FCT,      sector: 房地产信托}
+  - {code: "N2IU", market: SG, name: 丰树泛亚商业信托 MPACT, sector: 房地产信托}
+  - {code: "A17U", market: SG, name: 凯德腾飞信托 CLAR,     sector: 房地产信托}
+  - {code: "ME8U", market: SG, name: 丰树工业信托 MINT,     sector: 房地产信托}
+  - {code: "M44U", market: SG, name: 丰树物流信托 MLT,      sector: 房地产信托}
+  - {code: "BUOU", market: SG, name: 辉盛物流工业信托 FLCT,  sector: 房地产信托}
+  - {code: "AJBU", market: SG, name: 吉宝数据中心 Keppel DC, sector: 房地产信托}
+  - {code: "C2PU", market: SG, name: 百汇生命 PLife REIT,   sector: 房地产信托}
+  - {code: "HMN",  market: SG, name: 凯德雅诗阁信托 CLAS,   sector: 房地产信托}
+
+  # ================= 港股：香港本地（派息不扣税）=================
+  # lot 为每手股数，以 App 显示为准
+  - {code: "00002", market: HK, name: 中电控股,     sector: 公用事业,   tax: 0, lot: 500}
+  - {code: "00006", market: HK, name: 电能实业,     sector: 公用事业,   tax: 0, lot: 500}
+  - {code: "01038", market: HK, name: 长江基建,     sector: 公用事业,   tax: 0, lot: 500}
+  - {code: "00003", market: HK, name: 香港中华煤气, sector: 公用事业,   tax: 0, lot: 1000}
+  - {code: "00823", market: HK, name: 领展房产基金, sector: 房地产信托, tax: 0, lot: 100}
+  - {code: "06823", market: HK, name: 香港电讯,     sector: 电信,       tax: 0, lot: 1000}
+  - {code: "02388", market: HK, name: 中银香港,     sector: 银行,       tax: 0, lot: 500}
+  - {code: "00005", market: HK, name: 汇丰控股,     sector: 银行,       tax: 0, lot: 400}
+  - {code: "00066", market: HK, name: 港铁公司,     sector: 交通基建,   tax: 0, lot: 500}
+
+  # ================= 港股：内地红利（H股 / 红筹，扣 10%）=================
+  # pair = 对应 A股代码，看板会显示 AH 溢价和哪边税后更划算
+  - {code: "00941", market: HK, name: 中国移动,   sector: 电信, pair: "600941", lot: 500, hist_years: 5}
+  - {code: "00728", market: HK, name: 中国电信H,  sector: 电信, pair: "601728", lot: 2000, rating: "B"}
+  - {code: "02318", market: HK, name: 中国平安H,  sector: 保险, pair: "601318", lot: 500, hist_years: 5, rating: "A+"}
+  - {code: "00939", market: HK, name: 建设银行H,  sector: 银行, pair: "601939", lot: 1000}
+  - {code: "01398", market: HK, name: 工商银行H,  sector: 银行, pair: "601398", lot: 1000}
+  - {code: "03988", market: HK, name: 中国银行H,  sector: 银行, pair: "601988", lot: 1000}
+  - {code: "03968", market: HK, name: 招商银行H,  sector: 银行, pair: "600036", lot: 500, hist_years: 5, rating: "A-"}
+  - {code: "00883", market: HK, name: 中国海洋石油, sector: 能源, pair: "600938", lot: 1000, tag: 周期}
+  - {code: "00857", market: HK, name: 中国石油H,  sector: 能源, pair: "601857", lot: 2000, tag: 周期}
+  - {code: "00386", market: HK, name: 中国石化H,  sector: 能源, pair: "600028", lot: 2000, tag: 周期}
+  - {code: "01088", market: HK, name: 中国神华H,  sector: 能源, pair: "601088", lot: 500,  tag: 周期}
+  - {code: "00177", market: HK, name: 江苏宁沪高速, sector: 交通基建, pair: "600377", lot: 2000}
+  - {code: "00548", market: HK, name: 深圳高速H,  sector: 交通基建, pair: "600548", lot: 2000}
+  - {code: "00144", market: HK, name: 招商局港口, sector: 交通基建}
+
+  # ================= A股（东方财富账户，长期持有 0 税）=================
+  # 你原来表里的
+  - {code: "601318", market: A, name: 中国平安, sector: 保险, plan: {price_le: 49.00}, hist_years: 5, rating: "A+"}
+  - {code: "600036", market: A, name: 招商银行, sector: 银行, hist_years: 5, rating: "A-"}
+  - {code: "601336", market: A, name: 新华保险, sector: 保险, hist_years: 5}
+  - {code: "000333", market: A, name: 美的集团, sector: 家电, plan: {yield_ge: 5.5}}
+  - {code: "000651", market: A, name: 格力电器, sector: 家电, rating: "B"}
+  - {code: "000423", market: A, name: 东阿阿胶, sector: 医药, plan: {yield_ge: 6.0}}
+  - {code: "000538", market: A, name: 云南白药, sector: 医药, plan: {price_le: 47.27}}
+  - {code: "600750", market: A, name: 华润江中, sector: 医药}
+  - {code: "600132", market: A, name: 重庆啤酒, sector: 食品饮料, rating: "B"}
+  - {code: "600066", market: A, name: 宇通客车, sector: 制造}
+  - {code: "601088", market: A, name: 中国神华, sector: 能源, tag: 周期}
+  - {code: "000807", market: A, name: 云铝股份, sector: 有色, tag: 周期}
+  - {code: "600096", market: A, name: 云天化,   sector: 化工, tag: 周期, rating: "B"}
+  # 新增：公用事业 / 交通
+  - {code: "600900", market: A, name: 长江电力, sector: 公用事业}
+  - {code: "601006", market: A, name: 大秦铁路, sector: 交通基建}
+  - {code: "600377", market: A, name: 宁沪高速, sector: 交通基建}
+  - {code: "600548", market: A, name: 深高速,   sector: 交通基建}
+  # 新增：电信
+  - {code: "600941", market: A, name: 中国移动A, sector: 电信}
+  - {code: "601728", market: A, name: 中国电信A, sector: 电信, rating: "B"}
+  # 新增：银行（A股长期持有 0 税，AH 溢价小时 A 股更划算）
+  - {code: "601398", market: A, name: 工商银行, sector: 银行}
+  - {code: "601939", market: A, name: 建设银行, sector: 银行}
+  - {code: "601988", market: A, name: 中国银行, sector: 银行}
+  - {code: "601288", market: A, name: 农业银行, sector: 银行}
+  - {code: "601166", market: A, name: 兴业银行, sector: 银行}
+  # 新增：能源
+  - {code: "600938", market: A, name: 中国海油A, sector: 能源, tag: 周期}
+  - {code: "601857", market: A, name: 中国石油A, sector: 能源, tag: 周期}
+  - {code: "600028", market: A, name: 中国石化A, sector: 能源, tag: 周期}
+  - {code: "601225", market: A, name: 陕西煤业,  sector: 能源, tag: 周期}
+  # 新增：消费
+  - {code: "000895", market: A, name: 双汇发展, sector: 食品饮料}
+  - {code: "600887", market: A, name: 伊利股份, sector: 食品饮料}
+  - {code: "000858", market: A, name: 五粮液,   sector: 食品饮料}
+  - {code: "600398", market: A, name: 海澜之家, sector: 消费}
