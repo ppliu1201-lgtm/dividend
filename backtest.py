@@ -126,7 +126,7 @@ COMBOS = [("equal", 2), ("equal", 3), ("front", 2), ("front", 3)]
 COMBO_NAME = {"equal": "每档 1/3", "front": "50/25/25"}
 
 
-def portfolio(stocks, targets, weights, over, weeks):
+def portfolio(stocks, targets, weights, over, weeks, swing=None, sizing="plan"):
     """账户级模拟：各部分按目标比例封顶，同一部分里股息率分位高的先买，候选计划合计 = 目标 × over。
     stocks: [(bucket, {wk: row})]。返回每周净值和股票占比。"""
     cum = WEIGHTS[weights]
@@ -134,8 +134,9 @@ def portfolio(stocks, targets, weights, over, weeks):
     for b, _ in stocks:
         nb_bucket[b] = nb_bucket.get(b, 0) + 1
     cash = 1.0
-    st = [{"sh": 0.0, "units": 0.0, "peak": 0.0, "p": None} for _ in stocks]
+    st = [{"sh": 0.0, "units": 0.0, "peak": 0.0, "p": None, "ssh": 0.0} for _ in stocks]
     navs, inv = [], []
+    sw_inv, blocked, short, cash_out = [], 0, 0.0, 0
     for wk in weeks:
         cash *= 1 + CASH_W
         for i, (b, rows) in enumerate(stocks):
@@ -158,10 +159,31 @@ def portfolio(stocks, targets, weights, over, weeks):
                     cash += sell * x["p"] * (1 - COST)
                     x["sh"] -= sell; x["units"] = keep
         mv = [x["sh"] * x["p"] if x["p"] else 0.0 for x in st]
-        nav = cash + sum(mv)
+        # 波段（底仓之外）：先处理，看会不会挤掉底仓。波段市值和看板一样计入所在部分
+        if swing is not None:
+            for i, (b, rows) in enumerate(stocks):
+                x = st[i]
+                if not x["p"] or not swing[i]:
+                    continue
+                on = swing[i].get(wk)
+                if on is None:
+                    continue
+                if not on and x["ssh"] > 0:
+                    cash += x["ssh"] * x["p"] * (1 - COST); x["ssh"] = 0.0
+                elif on and x["ssh"] == 0:
+                    nav0 = cash + sum(mv) + sum(y["ssh"] * y["p"] for y in st if y["p"])
+                    size = 0.3 * (targets.get(b, 0) * over / max(1, nb_bucket.get(b, 1)) * nav0 if sizing == "plan" else mv[i])
+                    size = min(size, cash / (1 + COST))
+                    if size > 1e-9:
+                        x["ssh"] = size / x["p"]; cash -= size * (1 + COST)
+        smv = [x["ssh"] * x["p"] if x["p"] else 0.0 for x in st]
+        nav = cash + sum(mv) + sum(smv)
         # 再买：每个部分按分位从高到低
+        wk_blocked = False
+        sw_total = sum(smv)
         for bucket, tgt in targets.items():
-            room = tgt * nav - sum(m for (b, _), m in zip(stocks, mv) if b == bucket)
+            sw_b = sum(m for (b, _), m in zip(stocks, smv) if b == bucket)
+            room = tgt * nav - sum(m for (b, _), m in zip(stocks, mv) if b == bucket) - sw_b
             plan = tgt * over / max(1, nb_bucket.get(bucket, 1)) * nav
             cands = []
             for i, (b, rows) in enumerate(stocks):
@@ -176,14 +198,120 @@ def portfolio(stocks, targets, weights, over, weeks):
                 x = st[i]
                 want = cum[nb] * plan - x["units"]
                 amt = min(want, room, cash / (1 + COST))
+                if swing is not None and want > 1e-9:
+                    alt = min(want, room + sw_b, (cash + sw_total) / (1 + COST))
+                    if alt - max(amt, 0) > 0.001 * nav:      # 没有波段仓的话本来能多买
+                        wk_blocked = True; short += alt - max(amt, 0)
                 if amt <= 1e-9:
                     continue
                 x["sh"] += amt / x["p"]; x["units"] += amt; x["peak"] = max(x["peak"], x["units"])
                 cash -= amt * (1 + COST); room -= amt
         mv = [x["sh"] * x["p"] if x["p"] else 0.0 for x in st]
-        nav = cash + sum(mv)
+        smv = [x["ssh"] * x["p"] if x["p"] else 0.0 for x in st]
+        nav = cash + sum(mv) + sum(smv)
         navs.append(nav)
         inv.append(sum(mv) / nav if nav else 0)
+        sw_inv.append(sum(smv) / nav if nav else 0)
+        blocked += wk_blocked
+        cash_out += cash < 0.01 * nav
+    if swing is None:
+        return navs, inv
+    return navs, inv, {"sw": sum(sw_inv) / len(sw_inv) * 100, "blocked": blocked, "weeks": len(weeks),
+                       "short": short, "cash_out": cash_out}
+
+
+# ---------------- 底仓策略对比：我们的规则 vs 吴富贵网格 ----------------
+STRATS = [("ours", "我们的规则：分位三档（中位数且税后≥4.5% / 80 / 90 分位）各 1/3；20 分位卖到 2/3、10 分位卖到 1/3，留 1/3"),
+          ("ours_hold", "我们的买法，但永远不卖"),
+          ("fg", "吴富贵网格：税前股息率 5% / 5.5% / 6% 各买 1/3（中轨下才买）；每份涨回 0.5 个点卖（6→5.5、5.5→5、5→4.5），4% 清仓"),
+          ("fg2", "网格买法，卖得更晚：股息率 4.5% / 4% / 3.5% 各卖 1/3，3% 清仓")]
+FG_BUY = (5.0, 5.5, 6.0)
+FG_SELL = {"fg": (4.5, 5.0, 5.5), "fg2": (3.5, 4.0, 4.5)}   # 股息率 ≤ 第 k 个值时，最多只能留 k 份
+
+
+def strat_targets(strat, r, frac, peak):
+    """返回 (想买到的计划比例, 最多允许持有的计划比例)；None 表示不买 / 不限。"""
+    y = r["y"]
+    if strat in ("ours", "ours_hold"):
+        if not r["lv"]:
+            return None, None
+        nb = sum(1 for lv in r["lv"] if y >= lv)
+        buy = [0, 1 / 3, 2 / 3, 1.0][nb] if nb and r["wlow"] <= r["adj"] <= r["wmid"] else None
+        cap = None
+        if strat == "ours":
+            ns = sum(1 for sl in r["sl"] if y <= sl)
+            if ns:
+                cap = peak * (1 / 3 if ns >= 2 else 2 / 3)
+        return buy, cap
+    nb = sum(1 for lv in FG_BUY if y >= lv)
+    buy = nb / 3 if nb and r.get("wmid") and r["adj"] <= r["wmid"] else None
+    allowed = sum(1 for th in FG_SELL[strat] if y > th)          # 0..3 份
+    cap = allowed / 3 if allowed < 3 else None
+    return buy, cap
+
+
+def simulate_s(rows, strat):
+    cash, sh, frac, peak = 1.0, 0.0, 0.0, 0.0
+    navs, inv = [], []
+    for r in rows:
+        cash *= 1 + CASH_W
+        p = r["adj"]
+        buy, cap = strat_targets(strat, r, frac, peak)
+        if cap is not None and frac > cap + 1e-9:
+            part = (frac - cap) / frac
+            cash += sh * part * p * (1 - COST); sh *= 1 - part; frac = cap
+        elif buy is not None and buy > frac + 1e-9:
+            amt = min(buy - frac, cash / (1 + COST))
+            sh += amt / p; cash -= amt * (1 + COST); frac += amt; peak = max(peak, frac)
+        nav = cash + sh * p
+        navs.append(nav); inv.append(sh * p / nav if nav else 0)
+    return navs, inv
+
+
+def portfolio_s(stocks, targets, over, weeks, strat):
+    """账户级：和 portfolio() 一样按部分封顶、候选超额，但买卖规则换成 strat。"""
+    nb_bucket = {}
+    for b, _ in stocks:
+        nb_bucket[b] = nb_bucket.get(b, 0) + 1
+    cash = 1.0
+    st = [{"sh": 0.0, "units": 0.0, "peak": 0.0, "p": None} for _ in stocks]
+    navs, inv = [], []
+    for wk in weeks:
+        cash *= 1 + CASH_W
+        for i, (b, rows) in enumerate(stocks):
+            r = rows.get(wk)
+            if r:
+                st[i]["p"] = r["adj"]
+        mv = [x["sh"] * x["p"] if x["p"] else 0.0 for x in st]
+        nav = cash + sum(mv)
+        plans = {b: t * over / max(1, nb_bucket.get(b, 1)) * nav for b, t in targets.items()}
+        acts = []
+        for i, (b, rows) in enumerate(stocks):
+            r = rows.get(wk); x = st[i]
+            if not r or b not in plans or not x["p"]:
+                continue
+            frac = x["units"] / plans[b] if plans[b] else 0
+            peakf = x["peak"] / plans[b] if plans[b] else 0
+            buy, cap = strat_targets(strat, r, frac, peakf)
+            if cap is not None and frac > cap + 1e-9 and x["units"] > 0:
+                part = (frac - cap) / frac
+                cash += x["sh"] * part * x["p"] * (1 - COST); x["sh"] *= 1 - part; x["units"] *= 1 - part
+            elif buy is not None and buy > frac + 1e-9:
+                key = r.get("pct", 0) if strat.startswith("ours") else r["y"]
+                acts.append((b, key, i, (buy - frac) * plans[b]))
+        mv = [x["sh"] * x["p"] if x["p"] else 0.0 for x in st]
+        nav = cash + sum(mv)
+        room = {bk: t * nav - sum(m for (b, _), m in zip(stocks, mv) if b == bk) for bk, t in targets.items()}
+        for b, _, i, want in sorted(acts, key=lambda a: -a[1]):
+            x = st[i]
+            amt = min(want, room[b], cash / (1 + COST))
+            if amt <= 1e-9:
+                continue
+            x["sh"] += amt / x["p"]; x["units"] += amt; x["peak"] = max(x["peak"], x["units"])
+            cash -= amt * (1 + COST); room[b] -= amt
+        mv = [x["sh"] * x["p"] if x["p"] else 0.0 for x in st]
+        nav = cash + sum(mv)
+        navs.append(nav); inv.append(sum(mv) / nav if nav else 0)
     return navs, inv
 
 
@@ -242,9 +370,11 @@ def swing_test(h, mk, tax, days):
             wk_end[i] = True
     fee = RT_FEE.get(mk, 0.0025) / 2
     res = {}
+    res["wpos"] = {}
     for name, _ in SWINGS:
         cash, sh, pos = 1.0, 0.0, False
         pending, nav, trades, wins, entry, inmkt = None, [], 0, 0, 0.0, 0
+        wpos = res["wpos"][name] = {}
         for i in range(t0, n):
             p = adj[i]
             if pending == "buy" and not pos:
@@ -253,6 +383,7 @@ def swing_test(h, mk, tax, days):
                 cash = sh * p * (1 - fee); sh = 0.0; pos = False
                 wins += p > entry * (1 + 2 * fee)
             pending = None
+            wpos[date.fromisoformat(dates[i]).isocalendar()[:2]] = pos
             if not pos:
                 cash *= 1 + 0.015 / 252
             else:
@@ -326,13 +457,15 @@ def main():
         rows = [r for r in rows if r["lv"]][-YEARS * 52:]
         bucket = s.get("bucket") or build.BUCKET[mk]
         if rows:
-            prepared.append((bucket, {r["wk"]: r for r in rows}, mk))
+            prepared.append((bucket, {r["wk"]: r for r in rows}, mk, (sw_ or {}).get("wpos")))
         if len(rows) < 104:
             failed.append(f"{s['name']}：历史不足")
             continue
         res = {"s": s}
         for v, _ in VARIANTS:
             res[v] = stats(*simulate(rows, v))
+        for k, _ in STRATS:
+            res[k] = stats(*simulate_s(rows, k))
         # 下轨下方出现过几次“想买”的情况
         res["events"] = sum(1 for r in rows if r["y"] >= r["lv"][0] and r["adj"] < r["wlow"])
         res["from"] = rows[0]["d"]
@@ -351,6 +484,13 @@ def main():
         return xs[len(xs) // 2] if xs else 0
 
     touched = [r for r in results if r["events"] > 0]
+    strat_rows = ""
+    for k, label in STRATS:
+        rs = results
+        beat = sum(1 for r in rs if r[k]["cagr"] > r["ours"]["cagr"] + 0.05) if k != "ours" else None
+        strat_rows += (f"<tr><td>每只股票单独算</td><td style='white-space:normal;max-width:380px'>{label}</td><td>{avg(k):.2f}%</td><td>{med(k):.2f}%</td>"
+                       f"<td>{avg(k, 'mdd'):.1f}%</td><td>{avg(k, 'inv'):.0f}%</td><td>{'-' if beat is None else f'{beat}/{len(rs)}'}</td></tr>")
+        print("策略", k, round(avg(k), 2), round(avg(k, "inv")))
 
     # ---- 账户级：分批比例 × 候选超额 ----
     targets = {b: float(v) / 100 for b, v in (cfg.get("targets") or {}).items() if b not in ("现金",) and float(v) > 0}
@@ -378,10 +518,11 @@ def main():
         + f"<td>{r['hold']:.1f}%</td><td>{r['ma']['tpy']:.1f}</td></tr>"
         for s_, r in sorted(swing_res, key=lambda x: -(x[1]['ma']['cagr'] - x[1]['hold'])))
 
-    port_rows = ""
+    port_rows, crowd_rows = "", ""
     for acct, buckets in (("新币账户（新加坡+港股，现金 15%）", {b: t for b, t in targets.items() if b != "A股"}),
                           ("A股账户（全部可投）", {"A股": 1.0})):
-        ss = [(b, rows) for b, rows, _ in prepared if b in buckets]
+        ss = [(b, rows) for b, rows, _, _ in prepared if b in buckets]
+        swp = [wp for b, rows, _, wp in prepared if b in buckets]
         if not ss:
             continue
         weeks = sorted({wk for _, rows in ss for wk in rows})[-YEARS * 52:]
@@ -391,6 +532,27 @@ def main():
             port_rows += (f"<tr><td>{acct}</td><td>{COMBO_NAME[w]} · 超额 {ov} 倍</td><td>{st_['cagr']:.2f}%</td>"
                           f"<td>{st_['tot']:.0f}%</td><td>{st_['mdd']:.1f}%</td><td>{st_['inv']:.0f}%</td></tr>")
             print("组合", acct[:4], w, ov, {k: round(v, 2) for k, v in st_.items()})
+        # 底仓策略对比（账户级，超额 3 倍）
+        for k, label in STRATS:
+            navs, inv = portfolio_s(ss, buckets, 3, weeks, k)
+            st3 = stats(navs, inv)
+            strat_rows += (f"<tr><td>{acct}</td><td style='white-space:normal;max-width:380px'>{label.split('：')[0]}</td><td>{st3['cagr']:.2f}%</td><td>-</td>"
+                           f"<td>{st3['mdd']:.1f}%</td><td>{st3['inv']:.0f}%</td><td>-</td></tr>")
+            print("账户策略", acct[:4], k, {kk: round(v, 2) for kk, v in st3.items()})
+        # 波段仓会不会挤掉底仓（每档 1/3 · 超额 3 倍）
+        base_navs, base_inv = portfolio(ss, buckets, "equal", 3, weeks)
+        base_st = stats(base_navs, base_inv)
+        crowd_rows += (f"<tr><td>{acct}</td><td>不做波段（对照）</td><td>{base_st['cagr']:.2f}%</td><td>{base_st['inv']:.0f}%</td>"
+                       f"<td>-</td><td>-</td><td>-</td><td>{sum(1 for _ in [0]) and '-'}</td></tr>")
+        for k, label in SWINGS:
+            for sz, szname in (("plan", "计划的 30%"), ("hold", "已持有底仓的 30%")):
+                flags = [(wp or {}).get(k) for wp in swp]
+                navs, inv, ex = portfolio(ss, buckets, "equal", 3, weeks, swing=flags, sizing=sz)
+                st2 = stats(navs, inv)
+                crowd_rows += (f"<tr><td>{acct}</td><td style='white-space:normal'>{label.split('（')[0]} · 每次 {szname}</td>"
+                               f"<td>{st2['cagr']:.2f}%</td><td>{st2['inv']:.0f}%</td><td>{ex['sw']:.1f}%</td>"
+                               f"<td>{ex['blocked']} / {ex['weeks']} 周</td><td>{base_st['inv'] - st2['inv']:.1f} 个百分点</td><td>{ex['cash_out']} 周</td></tr>")
+                print("挤占", acct[:4], k, sz, round(st2["cagr"], 2), ex)
     winAC = sum(1 for r in touched if r["A"]["cagr"] > r["C"]["cagr"] + 0.05)
     winCA = sum(1 for r in touched if r["C"]["cagr"] > r["A"]["cagr"] + 0.05)
     winBC = sum(1 for r in touched if r["B"]["cagr"] > r["C"]["cagr"] + 0.05)
@@ -429,6 +591,14 @@ A 比 C 好的 {winAC} 只，C 比 A 好的 {winCA} 只；B 比 C 好的 {winBC}
 <div class="card"><h2>账户级回测：每档比例 × 候选超额（跌破下轨都按“等止跌”）</h2>
 <div class="tw"><table><tr><th>账户</th><th>规则</th><th>年化</th><th>累计</th><th>最大回撤</th><th>平均股票占比</th></tr>{port_rows}</table></div>
 <div class="hint" style="margin-top:6px">从全部现金开始，每周检查。同一部分里每只股票的计划 = 部分目标 × 超额倍数 ÷ 池子里的股票数；股息率分位高的先买，部分总额不超过目标。港股按港币价格计算，没算汇率变化。</div></div>
+<div class="card"><h2>底仓买卖规则对比：我们的规则 vs 吴富贵网格</h2>
+<div class="tw"><table><tr><th>范围</th><th>规则</th><th>平均年化</th><th>中位数</th><th>最大回撤</th><th>平均股票占比</th><th>比我们的规则好的股票</th></tr>{strat_rows}</table></div>
+<div class="hint" style="margin-top:6px">网格按博主公开的做法：股息率用税前、全年分红，5% 起买、每 0.5 个点一格，只在周线中轨下买；“卖得更晚”是另一种记忆中的版本。
+账户级同样按“部分封顶 + 候选超额 3 倍”，网格版先买股息率最高的。</div></div>
+<div class="card"><h2>波段仓会不会挤掉底仓的钱？（账户级，每档 1/3 · 超额 3 倍）</h2>
+<div class="tw"><table><tr><th>账户</th><th>波段做法</th><th>账户年化</th><th>平均底仓占比</th><th>平均波段占比</th><th>底仓被挤的周数</th><th>底仓占比比不做波段少</th><th>现金用光的周数</th></tr>{crowd_rows}</table></div>
+<div class="hint" style="margin-top:6px">波段仓在计划之外、用账户现金买，市值和看板一样计入所在部分；“被挤”= 如果没有波段仓，那一周本来能多买的底仓。
+波段按周末是否持仓近似（实际是日线进出）。</div></div>
 <div class="card"><h2>波段规则回测（一笔钱全进全出，和“一直持有同一只股票”比）</h2>
 <div class="tw"><table><tr><th>规则</th><th>平均年化</th><th>中位数</th><th>平均最大回撤</th><th>每年交易次数</th><th>胜率</th><th>持股时间</th><th>跑赢持有</th><th>跑赢现金 1.5%</th></tr>{sw_rows}</table></div>
 <div class="hint" style="margin-top:6px">逐日模拟最近约 {YEARS} 年：当天收盘出信号、第二天收盘成交；持股期间含分红，空仓时现金年化 1.5%；
