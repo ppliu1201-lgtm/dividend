@@ -77,7 +77,8 @@ def prepare(h, tax, floor_net):
                 m = sum(w) / 20
                 sd = (sum((x - m) ** 2 for x in w) / 20) ** 0.5
                 pct = sum(1 for x in sv if x <= y) / len(sv)
-                row.update(lv=(b1, b2, b3), sl=(s1, s2), wlow=m - 2 * sd, wmid=m, pct=pct, med=q(sv, 0.5))
+                row.update(lv=(b1, b2, b3), sl=(s1, s2), wlow=m - 2 * sd, wmid=m, pct=pct, med=q(sv, 0.5),
+                           s05=min(q(sv, 0.05), s2 * 0.94))
         ys.append(y)
         rows.append(row)
     return rows
@@ -234,6 +235,21 @@ FG_SELL = {"fg": (4.5, 5.0, 5.5), "fg2": (3.5, 4.0, 4.5),
 def strat_targets(strat, r, frac, peak):
     """返回 (想买到的计划比例, 最多允许持有的计划比例)；None 表示不买 / 不限。"""
     y = r["y"]
+    if strat in ("ours_all", "ours_half"):
+        if not r["lv"]:
+            return None, None
+        nb = sum(1 for lv in r["lv"] if y >= lv)
+        buy = [0, 1 / 3, 2 / 3, 1.0][nb] if nb and r["wlow"] <= r["adj"] <= r["wmid"] else None
+        cap = None
+        if strat == "ours_all":          # 20 分位 → 2/3，10 分位 → 1/3，5 分位 → 清仓
+            ns = sum(1 for sl in (*r["sl"], r["s05"]) if y <= sl)
+            if ns:
+                cap = peak * (2 / 3, 1 / 3, 0.0)[ns - 1]
+        else:                            # 20 分位卖一半，10 分位清仓
+            ns = sum(1 for sl in r["sl"] if y <= sl)
+            if ns:
+                cap = peak * (0.5, 0.0)[ns - 1]
+        return buy, cap
     if strat in ("ours", "ours_hold", "hyb"):
         if not r["lv"]:
             return None, None
@@ -327,7 +343,7 @@ def portfolio_s(stocks, targets, over, weeks, strat, ov_grid=None, ov_roll=None,
                 cash += x["sh"] * part * x["p"] * (1 - COST); x["sh"] *= 1 - part; x["units"] *= 1 - part
             elif buy is not None and buy > frac + 1e-9:
                 # 混合时统一按“股息率比第 1 档高出多少”排序，先买最便宜的
-                key = r.get("pct", 0) if sk in ("ours", "ours_hold", "hyb") else min(1.0, 0.5 + (r["y"] - FG_BUY[0]) / 4)
+                key = r.get("pct", 0) if sk in ("ours", "ours_hold", "hyb", "ours_all", "ours_half") else min(1.0, 0.5 + (r["y"] - FG_BUY[0]) / 4)
                 acts.append((b, key, i, (buy - frac) * plans[b]))
         mv = [x["sh"] * x["p"] if x["p"] else 0.0 for x in st]
         om = [0.0] * len(st) if sep else omv()
@@ -599,7 +615,7 @@ def main():
         + f"<td>{r['hold']:.1f}%</td><td>{r['ma']['tpy']:.1f}</td></tr>"
         for s_, r in sorted(swing_res, key=lambda x: -(x[1]['ma']['cagr'] - x[1]['hold'])))
 
-    port_rows, crowd_rows, hi_rows, sw2_rows = "", "", "", ""
+    port_rows, crowd_rows, hi_rows, sw2_rows, keep_rows = "", "", "", "", ""
     for acct, buckets in (("新币账户（新加坡+港股，现金 15%）", {b: t for b, t in targets.items() if b != "A股"}),
                           ("A股账户（全部可投）", {"A股": 1.0})):
         ss = [(b, rows) for b, rows, _, _, _ in prepared if b in buckets]
@@ -641,6 +657,30 @@ def main():
             hi_rows += (f"<tr><td>{acct}</td><td style='white-space:normal;max-width:380px'>{oname}</td><td>{st5['cagr']:.2f}%</td>"
                         f"<td>{st5['mdd']:.1f}%</td><td>{st5['inv']:.0f}%</td></tr>")
             print("高股息", acct[:4], opt or "base", {kk: round(v, 2) for kk, v in st5.items()})
+        # 新加坡/香港本地的卖法：留 1/3 还是卖光；并分前后两段看是否稳定
+        half = len(weeks) // 2
+        for sk2, sname in (("ours", "留 1/3（现在）"), ("ours_all", "20 分位 → 2/3、10 分位 → 1/3、5 分位清仓"),
+                           ("ours_half", "20 分位卖一半、10 分位清仓"), ("ours_hold", "永远不卖")):
+            mix = [sk2 if kd in ("SG", "HKL") else "fg2" for kd in kinds]
+            if acct.startswith("A股") and sk2 != "ours":
+                continue                                   # A股账户没有新加坡/香港本地股票
+            res_p = []
+            for wks in (weeks, weeks[:half], weeks[half:]):
+                navs, inv = portfolio_s(ss, buckets, 3, wks, mix)
+                res_p.append(stats(navs, inv))
+            keep_rows += (f"<tr><td>{acct}</td><td style='white-space:normal;max-width:340px'>{sname}</td><td>{res_p[0]['cagr']:.2f}%</td>"
+                          f"<td>{res_p[0]['mdd']:.1f}%</td><td>{res_p[1]['cagr']:.2f}%</td><td>{res_p[2]['cagr']:.2f}%</td></tr>")
+            print("卖法", acct[:4], sk2, [round(x["cagr"], 2) for x in res_p])
+        # A/H 股用哪种规则：分前后两段检查网格的优势是否稳定
+        for ak, aname in (("fg2", "A/H 股：网格晚卖（混合 2）"), ("fg", "A/H 股：网格原帖"), ("ours", "A/H 股：我们的分位规则")):
+            mix = ["ours" if kd in ("SG", "HKL") else ak for kd in kinds]
+            res_p = []
+            for wks in (weeks, weeks[:half], weeks[half:]):
+                navs, inv = portfolio_s(ss, buckets, 3, wks, mix)
+                res_p.append(stats(navs, inv))
+            keep_rows += (f"<tr><td>{acct}</td><td style='white-space:normal;max-width:340px'>{aname}</td><td>{res_p[0]['cagr']:.2f}%</td>"
+                          f"<td>{res_p[0]['mdd']:.1f}%</td><td>{res_p[1]['cagr']:.2f}%</td><td>{res_p[2]['cagr']:.2f}%</td></tr>")
+            print("AH规则", acct[:4], ak, [round(x["cagr"], 2) for x in res_p])
         # 底仓混合 2 + 另外一笔钱做波段（波段仓最多 = 该股底仓的 30%）
         base_mix = ["ours" if kd in ("SG", "HKL") else "fg2" for kd in kinds]
         roll_flags = [(wp or {}).get("roll") for wp in swp]
@@ -721,6 +761,9 @@ A 比 C 好的 {winAC} 只，C 比 A 好的 {winCA} 只；B 比 C 好的 {winBC}
 <div class="card"><h2>网格买到 6% 以后怎么办（混合 2：新加坡/香港本地用我们的规则，A/H 股用网格卖得更晚）</h2>
 <div class="tw"><table><tr><th>账户</th><th>A/H 股网格的做法</th><th>年化</th><th>最大回撤</th><th>平均股票占比</th></tr>{hi_rows}</table></div>
 <div class="hint" style="margin-top:6px">继续加格时，多出来的两格先卖：股息率回到 5.5%、5% 时各卖一格，之后照常 4.5% / 4% / 3.5%。“中位数”用该股近 5 年股息率。</div></div>
+<div class="card"><h2>稳定性检查：留不留最后 1/3、A/H 股用哪种规则（前后两段分别看）</h2>
+<div class="tw"><table><tr><th>账户</th><th>新加坡/香港本地的卖法</th><th>全期年化</th><th>最大回撤</th><th>前半段年化</th><th>后半段年化</th></tr>{keep_rows}</table></div>
+<div class="hint" style="margin-top:6px">前半段 / 后半段：把回测期分成两半各自从现金开始算，看结论是否两段都成立。</div></div>
 <div class="card"><h2>底仓用混合 2，波段仓用哪种规则？</h2>
 <div class="tw"><table><tr><th>账户</th><th>波段做法</th><th>底仓 + 波段合计年化</th><th>合计最大回撤</th><th>波段资金自己的年化</th><th>波段资金平均使用率</th></tr>{sw2_rows}</table></div>
 <div class="hint" style="margin-top:6px">底仓：新加坡/香港本地用我们的规则，A/H 股用网格卖得更晚。波段网格：5% / 5.5% / 6% 各买 1/3，每份涨回 0.5 个点卖（6→5.5、5.5→5、5→4.5）。
