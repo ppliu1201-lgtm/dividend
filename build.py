@@ -575,9 +575,12 @@ def build_stock(s, cfg, fx):
         t = swing.alert_text(sw)
         if t:
             alert.append(t)
-    star = yzone == "买入区" and (low or zone(price, b_w) == "下")
+    # 周线跌破布林下轨（还在急跌）时不标“低位机会”，和分批建议的“等止跌”保持一致
+    star = yzone == "买入区" and (low or zone(price, b_w) == "下") and not (b_w and price < b_w[0])
     if star:
         status = "低位机会"
+    elif yzone == "买入区" and b_w and price < b_w[0]:
+        status = "急跌中"
     elif yzone == "减仓区" or zone(price, b_w) == "上":
         status = "高位观察"
     else:

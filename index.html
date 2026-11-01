@@ -1,0 +1,1120 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>三地红利看板</title>
+<style>
+:root{
+  --bg:#f4f6fa; --card:#fff; --ink:#1d2433; --sub:#6b7486; --line:#e6e9f0; --soft:#f0f3f8;
+  --brand:#2f6fde; --brand-soft:#e8f0fd;
+  --up:#d63a3a; --down:#1f9d55;
+  --good:#1f9d55; --good-soft:#e7f6ee; --bad:#d63a3a; --bad-soft:#fdecec; --warn:#c98a00; --warn-soft:#fdf5e1;
+  --sg:#8a3ffc; --sg-soft:#f1e9ff;
+  --shadow:0 1px 2px rgba(20,30,60,.05),0 2px 8px rgba(20,30,60,.04);
+}
+@media (prefers-color-scheme: dark){
+  :root:not([data-theme="light"]){--bg:#0f1218; --card:#171b23; --ink:#e7eaf0; --sub:#8d96a8; --line:#262c38; --soft:#1e232d;
+    --brand:#6a9cf5; --brand-soft:#1c2a44; --good-soft:#13291e; --bad-soft:#331a1c; --warn-soft:#2f2715; --sg:#b48cff; --sg-soft:#2a2040; --shadow:none; color-scheme:dark;}
+}
+:root[data-theme="dark"]{--bg:#0f1218; --card:#171b23; --ink:#e7eaf0; --sub:#8d96a8; --line:#262c38; --soft:#1e232d;
+    --brand:#6a9cf5; --brand-soft:#1c2a44; --good-soft:#13291e; --bad-soft:#331a1c; --warn-soft:#2f2715; --sg:#b48cff; --sg-soft:#2a2040; --shadow:none; color-scheme:dark;}
+*{box-sizing:border-box}
+body{margin:0;background:var(--bg);color:var(--ink);font:14px/1.5 -apple-system,BlinkMacSystemFont,"PingFang SC","Microsoft YaHei",sans-serif;-webkit-font-smoothing:antialiased}
+.num{font-variant-numeric:tabular-nums}
+header{position:sticky;top:env(safe-area-inset-top,0px);z-index:5;background:var(--card);border-bottom:1px solid var(--line)}
+.bar{max-width:1280px;margin:0 auto;padding:10px 16px;display:flex;align-items:center;gap:14px;flex-wrap:wrap}
+.logo{font-weight:700;font-size:17px;letter-spacing:.5px}
+.tabs{display:flex;gap:4px;flex-wrap:wrap}
+.tab{border:0;background:none;color:var(--sub);padding:6px 12px;border-radius:8px;font:inherit;cursor:pointer;text-decoration:none}
+.tab.on{background:var(--brand);color:#fff}
+.meta{margin-left:auto;color:var(--sub);font-size:12px}
+main{max-width:1280px;margin:0 auto;padding:16px}
+.card{background:var(--card);border-radius:12px;box-shadow:var(--shadow);border:1px solid var(--line);margin-bottom:14px}
+.card-h{display:flex;align-items:center;gap:10px;padding:12px 16px;border-bottom:1px solid var(--line);flex-wrap:wrap}
+.card-h h2{margin:0;font-size:15px}
+.card-b{padding:14px 16px}
+.hint{color:var(--sub);font-size:12px}
+.seg{display:flex;background:var(--soft);border-radius:8px;padding:2px;margin-left:auto}
+.seg button{border:0;background:none;padding:4px 10px;border-radius:6px;font:inherit;font-size:12px;color:var(--sub);cursor:pointer}
+.seg button.on{background:var(--card);color:var(--ink);box-shadow:var(--shadow)}
+.btn{border:1px solid var(--line);background:var(--card);color:var(--ink);border-radius:8px;padding:5px 10px;font:inherit;font-size:12px;cursor:pointer}
+.btn.pri{background:var(--brand);border-color:var(--brand);color:#fff}
+.link{color:var(--brand);background:none;border:0;font:inherit;font-size:12px;cursor:pointer;padding:2px 0}
+
+.tbl{width:100%;border-collapse:collapse}
+.tw{overflow-x:auto}
+.tbl th{font-weight:500;color:var(--sub);font-size:12px;text-align:right;padding:8px 7px;border-bottom:1px solid var(--line);white-space:nowrap}
+.tbl td{padding:10px 7px;border-bottom:1px solid var(--line);text-align:right;vertical-align:middle;white-space:nowrap}
+.tbl th:first-child,.tbl td:first-child{text-align:left}
+.tbl tr.row{cursor:pointer}
+.tbl tr.row:hover td,.tbl tr.open td{background:var(--soft)}
+.nm{display:flex;align-items:center;gap:6px;flex-wrap:wrap}
+.nm b{font-weight:600}
+.code{color:var(--sub);font-size:12px}
+.mk{font-size:10px;padding:0 4px;border-radius:4px;background:var(--brand-soft);color:var(--brand)}
+.mk.HK{background:var(--warn-soft);color:var(--warn)}
+.mk.SG{background:var(--sg-soft);color:var(--sg)}
+.yrs{font-size:10px;color:var(--good);background:var(--good-soft);border-radius:4px;padding:0 4px}
+.up{color:var(--up)} .down{color:var(--down)} .muted{color:var(--sub)}
+.small{font-size:12px}
+.yld{font-weight:600}
+.yz{font-size:11px;padding:1px 6px;border-radius:4px;display:inline-block;margin-top:2px}
+.yz.买入区{background:var(--good-soft);color:var(--good)}
+.yz.减仓区{background:var(--bad-soft);color:var(--bad)}
+.yz.持有区{background:var(--soft);color:var(--sub)}
+.yld.买入区{color:var(--good)} .yld.减仓区{color:var(--bad)} .yld.持有区{color:var(--ink)}
+.zones{display:inline-grid;grid-template-columns:repeat(3,auto);gap:3px}
+.z{font-size:11px;padding:1px 5px;border-radius:4px;background:var(--soft);color:var(--sub)}
+.z.上{background:var(--bad-soft);color:var(--bad)} .z.下{background:var(--good-soft);color:var(--good)}
+.st{font-size:12px;padding:2px 8px;border-radius:10px;display:inline-block}
+.st.持有观望{background:var(--warn-soft);color:var(--warn)}
+.st.高位观察{background:var(--bad-soft);color:var(--bad)}
+.st.低位机会{background:var(--good-soft);color:var(--good)}
+.st.急跌中{background:var(--bad-soft,#fde8e8);color:var(--bad,#c53030)}
+.pend{font-size:11px;color:var(--warn)}
+
+.bb{width:108px;display:inline-block;text-align:left}
+.bb .track{position:relative;height:6px;border-radius:3px;background:linear-gradient(90deg,var(--good) 0 50%,var(--bad) 50% 100%);opacity:.75}
+.bb .dot{position:absolute;top:-3px;width:12px;height:12px;border-radius:50%;background:var(--card);border:2px solid var(--ink);transform:translateX(-50%)}
+.bb .lab{display:flex;justify-content:space-between;font-size:10px;color:var(--sub);margin-top:2px}
+
+.detail td{padding:0 10px 14px;background:var(--soft);text-align:left;white-space:normal}
+.dwrap{display:grid;gap:14px;padding-top:4px}
+.dcols{display:grid;grid-template-columns:minmax(0,1fr) minmax(0,1fr);gap:16px}
+.grid{display:flex;flex-wrap:wrap;gap:6px}
+.gc{min-width:74px;padding:6px 8px;border-radius:8px;text-align:center;border:1px solid var(--line);background:var(--card)}
+.gc .y{font-size:11px;font-weight:600;color:var(--brand)}
+.gc .p{font-weight:600}
+.gc .s{font-size:11px;color:var(--sub)}
+.gc.buy{border-color:var(--good);background:var(--good-soft)}
+.gc.buy .y{color:var(--good)}
+.gc.sell{border-color:var(--bad);background:var(--bad-soft)}
+.gc.sell .y{color:var(--bad)}
+.kv{display:flex;flex-wrap:wrap;gap:6px 18px;font-size:12px;color:var(--sub)}
+.kv b{color:var(--ink);font-weight:600}
+.sigs{display:flex;flex-wrap:wrap;gap:6px}
+.sig{font-size:12px;padding:2px 8px;border-radius:6px;background:var(--card);border:1px solid var(--line)}
+svg.chart{display:block;width:100%;height:auto}
+
+.stats{display:grid;grid-template-columns:repeat(4,1fr);gap:12px;margin-bottom:14px}
+.stat{padding:14px 16px;margin:0}
+.stat .l{color:var(--sub);font-size:12px}
+.stat .v{font-size:20px;font-weight:700;margin-top:2px}
+.stat .s{color:var(--sub);font-size:12px}
+.two{display:grid;grid-template-columns:1fr 1fr;gap:14px}
+.bars{padding:10px 16px 14px}
+.brow{margin:9px 0}
+.brow .t{display:flex;justify-content:space-between;gap:8px;font-size:12px}
+.brow .b{position:relative;height:8px;background:var(--soft);border-radius:4px;margin-top:4px}
+.brow .b i{display:block;height:100%;background:var(--brand);border-radius:4px}
+.brow .b i.over{background:var(--bad)}
+.brow .b .tg{position:absolute;top:-3px;width:2px;height:14px;background:var(--ink);opacity:.6}
+.alloc input{width:64px;padding:4px 6px;border:1px solid var(--line);border-radius:6px;background:var(--bg);color:var(--ink);font:inherit;font-size:12px;text-align:right}
+.warnbox{border-radius:10px;padding:10px 14px;font-size:13px;margin:0 0 8px}
+.warnbox.bad{background:var(--bad-soft);color:var(--bad)}
+.warnbox.ok{background:var(--good-soft);color:var(--good)}
+.empty{padding:36px 16px;text-align:center;color:var(--sub)}
+.note{font-size:12px;color:var(--sub);padding:0 4px 24px}
+.err{background:var(--bad-soft);color:var(--bad);padding:10px 14px;border-radius:10px;margin-bottom:14px;font-size:12px}
+.check{display:flex;gap:10px;align-items:flex-start;padding:8px 0;border-bottom:1px solid var(--line);font-size:13px}
+.check:last-child{border-bottom:0}
+.check input{margin-top:3px;width:16px;height:16px}
+textarea{width:100%;min-height:110px;padding:10px;border:1px solid var(--line);border-radius:8px;background:var(--bg);color:var(--ink);font:inherit;resize:vertical}
+ul.plain{margin:6px 0;padding-left:18px}
+ul.plain li{margin:3px 0}
+
+.boxbar{position:relative;width:170px;height:10px;border-radius:5px;background:var(--soft);display:inline-block;vertical-align:middle}
+.boxbar .zb{position:absolute;top:0;bottom:0;background:var(--good);opacity:.35;border-radius:5px 0 0 5px}
+.boxbar .zs{position:absolute;top:0;bottom:0;background:var(--bad);opacity:.35;border-radius:0 5px 5px 0}
+.boxbar .dot{position:absolute;top:-3px;width:14px;height:14px;border-radius:50%;background:var(--card);border:2px solid var(--ink);transform:translateX(-50%)}
+.boxbar .edge{position:absolute;top:-4px;bottom:-4px;width:1px;background:var(--sub)}
+.boxlab{display:flex;justify-content:space-between;width:170px;font-size:10px;color:var(--sub);margin-top:3px}
+.sw{font-size:12px;padding:2px 8px;border-radius:10px;display:inline-block;white-space:nowrap}
+.sw.买入确认{background:var(--good);color:#fff}
+.sw.买入区{background:var(--good-soft);color:var(--good)}
+.sw.卖出区{background:var(--bad-soft);color:var(--bad)}
+.sw.中部{background:var(--soft);color:var(--sub)}
+.sw.跌破{background:var(--bad);color:#fff}
+.sw.突破{background:var(--warn);color:#fff}
+.newdot{display:inline-block;width:6px;height:6px;border-radius:50%;background:var(--bad);margin-left:4px;vertical-align:middle}
+.fld select{width:100%;padding:9px 10px;border:1px solid var(--line);border-radius:8px;background:var(--bg);color:var(--ink);font:inherit}
+.row2{display:grid;grid-template-columns:1fr 1fr;gap:10px}
+.mini{font-size:11px;color:var(--sub)}
+dialog{border:0;border-radius:14px;padding:0;width:min(380px,92vw);background:var(--card);color:var(--ink);box-shadow:0 10px 40px rgba(0,0,0,.25)}
+dialog::backdrop{background:rgba(10,15,25,.4)}
+.dlg{padding:18px}
+.dlg h3{margin:0 0 4px;font-size:16px}
+.fld{display:block;margin:12px 0}
+.fld span{display:block;font-size:12px;color:var(--sub);margin-bottom:4px}
+.fld input{width:100%;padding:9px 10px;border:1px solid var(--line);border-radius:8px;background:var(--bg);color:var(--ink);font:inherit}
+.dlg .acts{display:flex;gap:8px;justify-content:flex-end;margin-top:16px}
+
+@media (max-width:760px){
+  header{position:static}
+  .bar{gap:8px}
+  .meta{margin-left:0;width:100%;font-size:11px}
+  .stats{grid-template-columns:1fr 1fr}
+  .two,.dcols{grid-template-columns:1fr}
+  .tbl thead{display:none}
+  .tbl,.tbl tbody,.tbl tr,.tbl td{display:block;width:100%}
+  .tbl tr.row{padding:10px 14px;border-bottom:1px solid var(--line);display:grid;grid-template-columns:repeat(3,1fr);gap:8px 10px}
+  .tbl tr.row td{padding:0;border:0;text-align:left;white-space:normal;background:none!important}
+  .tbl tr.row td:first-child{grid-column:1/-1}
+  .tbl tr.row td[data-l]::before{content:attr(data-l);display:block;font-size:11px;color:var(--sub)}
+  .tbl tr.row td.hide-m{display:none}
+  .tbl tr.open{background:var(--soft)}
+  .detail td{padding:0 14px 14px}
+  .bb{width:100%}
+  .boxbar,.boxlab{width:100%}
+}
+.rt{display:inline-block;margin-left:4px;padding:0 5px;border-radius:5px;font-size:11px;font-weight:600;line-height:17px;background:color-mix(in srgb,var(--up,#d64545) 0%,transparent);border:1px solid var(--line);color:var(--sub)}
+.rt.weak{color:#b7791f;border-color:#e8c27a}
+.chk{display:inline-block;min-width:16px;text-align:center;font-weight:700}.chk.y{color:var(--down,#1f9d55)}.chk.n{color:var(--sub);opacity:.6}
+</style>
+</head>
+<body>
+<header>
+  <div class="bar">
+    <div class="logo">三地红利看板</div>
+    <nav class="tabs" id="tabs">
+      <button class="tab" data-t="board">持仓看板</button>
+      <button class="tab" data-t="low">低位观察</button>
+      <button class="tab" data-t="swing">波段</button>
+      <button class="tab" data-t="plan">计划</button>
+      <button class="tab" data-t="alloc">配置</button>
+      <button class="tab" data-t="review">周复盘</button>
+      <a class="tab" href="backtest.html">回测</a>
+      <a class="tab" href="fillstats.html">建仓统计</a>
+    </nav>
+    <div class="meta num" id="meta">加载中…</div>
+  </div>
+</header>
+<main id="app"></main>
+
+<dialog id="dlg"><form class="dlg" method="dialog">
+  <h3 id="dlgTitle">编辑持仓</h3>
+  <div class="hint">只保存在这台设备的浏览器里，不会上传。</div>
+  <label class="fld"><span>持股数</span><input id="fShares" type="number" inputmode="decimal" min="0" step="1"></label>
+  <label class="fld"><span id="fCostLab">成本价</span><input id="fCost" type="number" inputmode="decimal" min="0" step="0.001"></label>
+  <label class="fld"><span>计划占比（这只股票最多占所在账户总资产的 %，建议 3–12）</span><input id="fPlan" type="number" inputmode="decimal" min="0" max="15" step="0.5"></label>
+  <div class="hint" id="fPlanHint"></div>
+  <label class="fld"><span>公司评级（季报后更新）：A+ 计划 ×1.2，A− 不变，B 及以下减半、跌破 250 日线暂停加仓</span><select id="fRating">
+    <option value="">用默认</option><option value="A+">A+ 有分红 + 业绩增长</option><option value="A-">A− 有分红 + 业绩横盘</option>
+    <option value="B">B 有分红 + 业绩下滑</option><option value="B-">B− 有分红 + 业绩差</option></select></label>
+  <div class="acts">
+    <button class="btn" value="clear">清除</button>
+    <button class="btn" value="cancel">取消</button>
+    <button class="btn pri" value="save">保存</button>
+  </div>
+</form></dialog>
+<dialog id="sdlg"><form class="dlg" method="dialog">
+  <h3 id="sTitle">记一笔波段</h3>
+  <div class="hint">只记波段仓的买卖；底仓在“持仓看板”录入。保存在本机浏览器。</div>
+  <div class="row2">
+    <label class="fld"><span>方向</span><select id="sSide"><option value="buy">买入</option><option value="sell">卖出</option></select></label>
+    <label class="fld"><span>日期</span><input id="sDate" type="date"></label>
+  </div>
+  <div class="row2">
+    <label class="fld"><span id="sPriceLab">成交价</span><input id="sPrice" type="number" inputmode="decimal" min="0" step="0.001"></label>
+    <label class="fld"><span>股数</span><input id="sShares" type="number" inputmode="decimal" min="0" step="1"></label>
+  </div>
+  <div class="acts">
+    <button class="btn" value="cancel">取消</button>
+    <button class="btn pri" value="save">保存</button>
+  </div>
+</form></dialog>
+<input type="file" id="importFile" accept="application/json" hidden>
+
+<script>
+const KEY = "dividend-v2", OLDKEY = "dividend-holdings-v1";
+const UNIT = {CNY:"¥", HKD:"HK$", SGD:"S$"};
+const MKNAME = {A:"A", HK:"港", SG:"新"};
+let DATA = null, TAB = "board", MKT = "all", OPEN = new Set(), editing = null;
+
+/* ---------- 本地存储（持仓、现金、目标、复盘） ---------- */
+function load(){
+  let st = {};
+  try { st = JSON.parse(localStorage.getItem(KEY) || "{}"); } catch(e){}
+  if (!st.holdings){
+    st.holdings = {};
+    try { st.holdings = JSON.parse(localStorage.getItem(OLDKEY) || "{}"); } catch(e){}
+  }
+  st.cash ??= 0; st.targets ??= null; st.reviews ??= {}; st.swings ??= []; st.plans ??= {}; st.planPct ??= {}; st.peak ??= {}; st.cashLog ??= []; st.aCash ??= 0; st.rating ??= {};
+  return st;
+}
+let ST = load();
+const save = () => { try { localStorage.setItem(KEY, JSON.stringify(ST)); } catch(e){} };
+
+const k = s => s.market + ":" + s.code;
+const $ = s => document.querySelector(s);
+const esc = s => String(s ?? "").replace(/[&<>"]/g, c => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;"}[c]));
+const f = (x, n=2) => x == null || isNaN(x) ? "-" : Number(x).toFixed(n);
+const pf = s => s.price < 10 ? 3 : 2;                       // 新加坡低价股多保留一位
+const money = x => x == null || isNaN(x) ? "-" : Math.round(x).toLocaleString("zh-CN");
+const cur = s => UNIT[s.qccy];
+const sgd = (v, s) => v * s.fx;
+const sign = x => x > 0 ? "up" : x < 0 ? "down" : "muted";
+const pctTxt = x => x == null ? "-" : (x > 0 ? "+" : "") + f(x) + "%";
+const targets = () => ST.targets || DATA.targets || {};
+
+function holding(s){
+  const h = ST.holdings[k(s)];
+  if (!h || !(h.shares > 0)) return null;
+  const mv = h.shares * s.price;
+  return { shares:h.shares, cost:h.cost, mv, mvS: sgd(mv, s),
+           pnl: h.cost ? mv - h.shares*h.cost : null, pnlPct: h.cost ? (s.price/h.cost-1)*100 : null,
+           div: h.shares * s.dps_net, divS: sgd(h.shares * s.dps_net, s),
+           costYield: h.cost && s.dps_net ? s.dps_net / h.cost * 100 : null };
+}
+const filtered = () => DATA.stocks.filter(s => MKT === "all" || s.market === MKT);
+
+/* ---------- 小组件 ---------- */
+function nameCell(s){
+  return `<div><div class="nm"><b>${esc(s.name)}</b><span class="mk ${s.market}">${MKNAME[s.market]}</span>${s.market==="HK"&&!s.tax?'<span class="yrs" title="香港本地公司，派息不扣税">0税</span>':""}${s.tag?`<span class="mk HK" title="利润随商品价格大起大落，分红也会变，仓位要小">${esc(s.tag)}</span>`:""}${ratingOf(s)?`<span class="rt ${weakR(s)?"weak":""}" title="公司评级：${RATING_TXT[ratingOf(s)]||""}${ratingMul(s)!==1?"，计划仓位按 "+ratingMul(s)+" 倍":""}">${esc(ratingOf(s))}</span>`:""}</div>
+    <div class="code num">${esc(s.code)} · ${esc(s.sector)}</div></div>`;
+}
+function priceCell(s){
+  return `<div>${cur(s)}${f(s.price, pf(s))}</div><div class="small ${sign(s.chg)}">${pctTxt(s.chg)}</div>`;
+}
+function yieldCell(s){
+  if (!(s.dps > 0)) return `<span class="pend">近一年无分红</span>`;
+  const p = s.ypct != null ? `${s.win_years && s.win_years < 10 ? "近"+s.win_years+"年 " : ""}${s.ypct} 分位` : "历史不足";
+  return `<div class="yld ${s.yzone} num">${f(s.yield)}%</div>
+    <span class="yz ${s.yzone}">${s.yzone} · ${p}</span>`;
+}
+function bandCell(s){
+  if (!s.buy_price) return "-";
+  return `<div class="small num"><span class="down">买 ≤ ${f(s.buy_price, pf(s))}</span></div>
+          <div class="small num"><span class="up">减 ≥ ${f(s.sell_price, pf(s))}</span></div>`;
+}
+function bbBar(s){
+  const b = s.boll.w; if (!b) return "-";
+  const [lo, mid, up] = b, span = up - lo || 1;
+  const pos = Math.max(0, Math.min(100, (s.price - lo) / span * 100));
+  const dLo = (s.price / lo - 1) * 100;
+  return `<div class="bb"><div class="track"><span class="dot" style="left:${pos}%"></span></div>
+    <div class="lab num"><span>${f(lo,pf(s))}</span><span>${f(mid,pf(s))}</span><span>${f(up,pf(s))}</span></div>
+    <div class="small muted num" style="text-align:center">${dLo<0?"跌破下轨 "+f(-dLo,1):"距下轨 "+f(dLo,1)}%</div></div>`;
+}
+const zones = s => `<span class="zones">${["d","w","m"].map((p,i)=>`<span class="z ${s.zone[p]||""}">${"日周月"[i]}${s.zone[p]||"-"}</span>`).join("")}</span>`;
+const stCell = s => `<span class="st ${s.status}">${s.star?"★ ":""}${s.status}</span>`;
+
+function yieldChart(s){
+  const pts = s.yhist; if (!pts || pts.length < 10) return `<div class="hint">历史数据不足，暂不画股息率走势。</div>`;
+  const W = 520, H = 150, L = 34, R = 8, T = 10, B = 22;
+  const ys = pts.map(p=>p[1]).concat([s.yield_gross||0]);
+  const mx = Math.max(...ys, s.y_buy||0) * 1.08, mn = 0;
+  const X = i => L + i/(pts.length-1)*(W-L-R), Y = v => T + (1-(v-mn)/(mx-mn))*(H-T-B);
+  const line = pts.map((p,i)=>`${X(i).toFixed(1)},${Y(p[1]).toFixed(1)}`).join(" ");
+  const hl = (v, c) => v==null ? "" : `<line x1="${L}" x2="${W-R}" y1="${Y(v)}" y2="${Y(v)}" stroke="${c}" stroke-dasharray="4 3" stroke-width="1"/>`;
+  const yrs = []; let last = "";
+  pts.forEach((p,i)=>{ const y = p[0].slice(0,4); if (y!==last && i>0 && X(i)-(yrs.length?yrs[yrs.length-1][0]:0)>36){ yrs.push([X(i),y]); } last = y; });
+  const ticks = [0, mx/2, mx].map(v=>`<text x="${L-4}" y="${Y(v)+3}" text-anchor="end" font-size="10" fill="var(--sub)">${f(v,1)}</text>`).join("");
+  return `<svg class="chart" viewBox="0 0 ${W} ${H}">
+    ${ticks}
+    ${hl(s.y_buy, "var(--good)")}${hl(s.y_med, "var(--sub)")}${hl(s.y_sell, "var(--bad)")}
+    <polyline fill="none" stroke="var(--brand)" stroke-width="1.6" points="${line}"/>
+    ${yrs.map(([x,y])=>`<text x="${x}" y="${H-6}" font-size="10" fill="var(--sub)" text-anchor="middle">${y}</text>`).join("")}
+    <circle cx="${X(pts.length-1)}" cy="${Y(s.yield_gross||0)}" r="3.5" fill="var(--brand)"/>
+  </svg>
+  <div class="kv" style="margin-top:2px"><span style="color:var(--brand)">— 股息率（税前）</span><span style="color:var(--good)">┅ 买入线 ${f(s.y_buy)}%</span><span>┅ 中位 ${f(s.y_med)}%</span><span style="color:var(--bad)">┅ 减仓线 ${f(s.y_sell)}%</span></div>`;
+}
+function spark(arr){
+  if (!arr || arr.length < 2) return "";
+  const w = 220, h = 40, mn = Math.min(...arr), mx = Math.max(...arr), r = mx - mn || 1;
+  const pts = arr.map((v,i)=>`${(i/(arr.length-1)*w).toFixed(1)},${(h-2-(v-mn)/r*(h-4)).toFixed(1)}`).join(" ");
+  const c = arr[arr.length-1] >= arr[0] ? "var(--up)" : "var(--down)";
+  return `<svg width="${w}" height="${h}" viewBox="0 0 ${w} ${h}"><polyline fill="none" stroke="${c}" stroke-width="1.5" points="${pts}"/></svg>`;
+}
+function detail(s, cols){
+  const sellY = s.y_sell != null ? s.y_sell * (1 - s.tax/100) : null, buyY = s.y_buy != null ? s.y_buy * (1 - s.tax/100) : null;
+  const g = s.grid.length ? `<div class="grid">${s.grid.map(x=>{
+      const cls = buyY && x.y >= buyY - 1e-9 ? "buy" : sellY && x.y <= sellY + 1e-9 ? "sell" : "";
+      return `<div class="gc ${cls}"><div class="y">${f(x.y,1)}%</div><div class="p num">${cur(s)}${f(x.price,pf(s))}</div>
+        <div class="s num">${x.reached?(cls==="sell"?"需涨 "+f(x.dist,1)+"%":cls==="buy"?"已达":"已越过"):"需跌 "+f(-x.dist,1)+"%"}</div></div>`;}).join("")}</div>`
+    : `<div class="pend">近一年没有分红记录，无法算网格。</div>`;
+  const v = s.val ? (s.val.pe_p10 != null
+      ? `<span>PE(TTM) <b>${f(s.val.pe,1)}</b>（1年分位 ${s.val.pe_p1}% · 10年 ${s.val.pe_p10}%）</span><span>PB <b>${f(s.val.pb,2)}</b>（1年 ${s.val.pb_p1}% · 10年 ${s.val.pb_p10}%）</span>`
+      : `<span>PE <b>${f(s.val.pe,1)}</b></span><span>PB <b>${f(s.val.pb,2)}</b></span>`) : "";
+  const ah = s.ah ? `<span>AH 溢价 <b>${f(s.ah.premium,1)}%</b></span><span>税后股息率 A ${f(s.ah.a_yield)}% · H ${f(s.ah.h_yield)}%${s.ah.better?` → <b>${s.ah.better} 股更划算</b>`:""}</span>` : "";
+  const divs = s.divs_recent && s.divs_recent.length ? `<span>最近派息 ${s.divs_recent.slice(-4).map(([d,x])=>`<b class="num">${d.slice(2)} ${f(x,3)}</b>`).join(" · ")}</span>` : "";
+  const rule = s.mode === "分位"
+    ? `过去 ${s.hist_years} 年股息率（税前）：减仓线 ${f(s.y_sell)}% · 中位 ${f(s.y_med)}% · 买入线 ${f(s.y_buy)}%；当前 ${f(s.yield_gross)}%，处于 ${s.ypct} 分位`
+    : `历史不足 3 年，用固定规则：税后 ≥ ${DATA.defaults.buy_yield}% 买入，≤ ${DATA.defaults.sell_yield}% 减仓`;
+  return `<tr class="detail"><td colspan="${cols}"><div class="dwrap">
+    ${s.signals.length ? `<div class="sigs">${s.signals.map(x=>`<span class="sig">${esc(x)}</span>`).join("")}</div>` : ""}
+    <div class="dcols">
+      <div><div class="hint" style="margin-bottom:4px">${rule}</div>${yieldChart(s)}</div>
+      <div>${ladderBox(s)}<div class="hint" style="margin-bottom:6px">税后股息率网格（每股分红 ${f(s.dps,4)} ${s.qccy}，${s.dps_src}${s.tax?"，扣税 "+s.tax+"%":""}）· 绿色=买入区，红色=减仓区</div>${g}
+        <div class="hint" style="margin-top:10px">近 60 个交易日</div>${spark(s.spark)}</div>
+    </div>
+    <div class="kv">${v}${ah}${divs}<span>近12月实际分红 <b>${f(s.ttm,4)}</b></span><span>数据日期 ${s.date}</span></div>
+  </div></td></tr>`;
+}
+function mktSeg(){
+  return `<div class="seg">${[["all","全部"],["SG","新加坡"],["HK","港股"],["A","A股"]].map(([v,t])=>
+    `<button data-m="${v}" class="${MKT===v?"on":""}">${t}</button>`).join("")}</div>`;
+}
+
+/* ---------- 持仓看板 ---------- */
+function viewBoard(){
+  const list = filtered().slice().sort((a,b)=>{
+    const ha = holding(a)?1:0, hb = holding(b)?1:0;
+    return hb - ha || (b.ypct ?? -1) - (a.ypct ?? -1);
+  });
+  const cols = 11;
+  const rows = list.map(s=>{
+    const h = holding(s), id = k(s);
+    return `<tr class="row ${OPEN.has(id)?"open":""}" data-id="${id}">
+      <td>${nameCell(s)}</td>
+      <td data-l="现价/涨跌" class="num">${priceCell(s)}</td>
+      <td data-l="持股 / 成本" class="num ${h||swingOpen(s).shares?"":"hide-m"}">${h?`<div>${h.shares.toLocaleString()}</div><div class="small muted">${h.cost?cur(s)+f(h.cost,3):"-"}</div>`:`<span class="muted">-</span>`}${swingOpen(s).shares?`<div class="mini">+波段 ${swingOpen(s).shares.toLocaleString()}</div>`:""}</td>
+      <td data-l="市值 / 盈亏" class="num ${h?"":"hide-m"}">${h?`<div>${cur(s)}${money(h.mv)}</div><div class="small ${sign(h.pnl)}">${h.pnl==null?"-":(h.pnl>0?"+":"")+money(h.pnl)+" ("+f(h.pnlPct,1)+"%)"}</div>`:`<span class="muted">-</span>`}</td>
+      <td data-l="年股息(税后)" class="num ${h&&s.dps>0?"":"hide-m"}">${h&&s.dps>0?`<div>${cur(s)}${money(h.div)}</div>${h.costYield?`<div class="small muted">成本股息率 ${f(h.costYield)}%</div>`:""}`:`<span class="muted">-</span>`}</td>
+      <td data-l="股息率(税后)">${yieldCell(s)}</td>
+      <td data-l="分批建议">${adviceCell(s)}</td>
+      <td data-l="日/周/月">${zones(s)}</td>
+      <td data-l="周线 BOLL" class="hide-m">${bbBar(s)}</td>
+      <td data-l="信号">${stCell(s)}</td>
+      <td data-l="操作"><button class="link" data-edit="${id}">${h?"修改":"录入持仓"}</button></td>
+    </tr>${OPEN.has(id)?detail(s,cols):""}`;
+  }).join("");
+  return `<div class="card"><div class="card-h"><h2>持仓明细</h2><span class="hint">点行展开股息率走势和网格 · 持仓股在前，其余按股息率分位从高到低</span>${mktSeg()}</div>
+    <div class="tw"><table class="tbl"><thead><tr><th>股票</th><th>现价/涨跌</th><th>持股/成本</th><th>市值/盈亏</th><th>年股息</th><th>股息率</th><th>分批建议</th><th>日/周/月</th><th>周线 BOLL</th><th>信号</th><th>操作</th></tr></thead>
+    <tbody>${rows}</tbody></table></div></div>`;
+}
+
+/* ---------- 低位观察 ---------- */
+function lowTable(list, extra){
+  const cols = 7;
+  return `<div class="tw"><table class="tbl"><thead><tr><th>股票</th><th>现价/涨跌</th><th>股息率</th><th>PE / PB</th><th>周线 BOLL</th><th>买入价</th><th>${extra?"还差":"信号"}</th></tr></thead><tbody>${
+    list.map(s=>{ const id = k(s);
+      const wait = s.yzone !== "买入区" ? `股息率到买入线（需跌 ${f((1-s.buy_price/s.price)*100,1)}%）` : "等周线回到下轨附近";
+      return `<tr class="row ${OPEN.has(id)?"open":""}" data-id="${id}">
+        <td>${nameCell(s)}</td>
+        <td data-l="现价/涨跌" class="num">${priceCell(s)}</td>
+        <td data-l="股息率(税后)">${yieldCell(s)}</td>
+        <td data-l="PE / PB" class="num">${s.val?`<div>${f(s.val.pe,1)} / ${f(s.val.pb,2)}</div>${s.val.pe_p10!=null?`<div class="small muted">10年分位 ${s.val.pe_p10}% / ${s.val.pb_p10}%</div>`:""}`:"-"}</td>
+        <td data-l="周线 BOLL">${bbBar(s)}</td>
+        <td data-l="买入价" class="num">${s.buy_price?cur(s)+f(s.buy_price,pf(s)):"-"}</td>
+        <td data-l="${extra?"还差":"信号"}">${extra?`<span class="st 持有观望">${wait}</span>`:stCell(s)}</td>
+      </tr>${OPEN.has(id)?detail(s,cols):""}`;}).join("")}</tbody></table></div>`;
+}
+function viewLow(){
+  const all = filtered();
+  const ok = all.filter(s => s.star).sort((a,b)=>b.ypct-a.ypct);
+  const near = all.filter(s => !s.star && s.dps > 0 && (
+      (s.yzone === "买入区") ||
+      ((s.zone.w === "下" || (s.boll.w && s.price <= s.boll.w[0]*1.03)) && s.ypct != null && s.ypct >= 60)))
+    .sort((a,b)=>(b.ypct??0)-(a.ypct??0));
+  return `<div class="card"><div class="card-h"><h2>✅ 低位观察</h2><span class="hint">股息率处于自己历史的买入区，且周线在布林带下 1/3</span>${mktSeg()}</div>
+      ${ok.length?lowTable(ok,false):`<div class="empty">今天没有两个条件同时满足的股票。</div>`}</div>
+    <div class="card"><div class="card-h"><h2>⚡ 接近低位</h2><span class="hint">只差一个条件</span></div>
+      ${near.length?lowTable(near,true):`<div class="empty">暂无。</div>`}</div>`;
+}
+
+/* ---------- 计划 ---------- */
+function viewPlan(){
+  const list = filtered().filter(s=>s.plan).sort((a,b)=>(b.plan.dist??-999)-(a.plan.dist??-999));
+  const rows = list.map(s=>{
+    const p = s.plan, h = holding(s);
+    const dist = p.hit ? `<b class="yld 买入区">已达成</b>` : p.dist==null ? `<span class="pend">无分红数据</span>` : `<span class="down">需跌 ${f(-p.dist)}%</span>`;
+    return `<tr class="row" style="cursor:default;${p.hit?"background:var(--good-soft)":""}">
+      <td>${nameCell(s)}</td>
+      <td data-l="触发条件">${esc(p.cond)}</td>
+      <td data-l="目标价" class="num">${p.target?cur(s)+f(p.target,pf(s)):"-"}</td>
+      <td data-l="现价/涨跌" class="num">${priceCell(s)}</td>
+      <td data-l="距触发">${dist}</td>
+      <td data-l="目标价股息率" class="num">${p.target&&s.dps_net?f(s.dps_net/p.target*100)+"%":"-"}</td>
+      <td data-l="持股" class="num">${h?h.shares.toLocaleString():"-"}</td>
+    </tr>`;}).join("");
+  return `<div class="card"><div class="card-h"><h2>待执行计划</h2><span class="hint">达成的整行高亮 · 计划在 watchlist.yaml 的 plan 里改</span>${mktSeg()}</div>
+    ${list.length?`<div class="tw"><table class="tbl"><thead><tr><th>股票</th><th>触发条件</th><th>目标价</th><th>现价/涨跌</th><th>距触发</th><th>目标价股息率</th><th>持股</th></tr></thead><tbody>${rows}</tbody></table></div>`
+      :`<div class="empty">还没有计划。</div>`}</div>`;
+}
+
+/* ---------- 波段：记账（FIFO） ---------- */
+function swingBook(){
+  const byKey = {}, year = String(new Date().getFullYear());
+  let ytdS = 0, ytdN = 0, allS = 0;
+  const rows = [];
+  ST.swings.slice().sort((a,b)=>a.date.localeCompare(b.date) || a.id.localeCompare(b.id)).forEach(t=>{
+    const s = DATA.stocks.find(x=>k(x)===t.key);
+    const b = byKey[t.key] ||= {lots:[], realized:0};
+    let real = null;
+    if (t.side === "buy"){ b.lots.push({q:t.shares, p:t.price}); b.nb = (b.lots.length === 1 ? 0 : (b.nb||0)) + 1; }
+    else {
+      let q = t.shares; real = 0;
+      while (q > 0 && b.lots.length){
+        const lot = b.lots[0], use = Math.min(q, lot.q);
+        real += use * (t.price - lot.p); lot.q -= use; q -= use;
+        if (lot.q <= 1e-9) b.lots.shift();
+      }
+      b.realized += real;
+      if (!b.lots.length) b.nb = 0;
+      const rS = s ? sgd(real, s) : 0; allS += rS;
+      if (t.date.startsWith(year)){ ytdS += rS; ytdN++; }
+    }
+    rows.push({...t, s, real});
+  });
+  return {byKey, ytdS, ytdN, allS, trades: rows.reverse()};
+}
+function swingOpen(s){
+  if (!ST.swings.length) return {shares:0, cost:0};
+  const b = swingBook().byKey[k(s)];
+  if (!b) return {shares:0, cost:0};
+  const shares = b.lots.reduce((a,l)=>a+l.q,0), cost = b.lots.reduce((a,l)=>a+l.q*l.p,0);
+  return {shares, cost, avg: shares ? cost/shares : null, realized: b.realized, nb: shares ? (b.nb||1) : 0};
+}
+function confirmDel(el){
+  if (el.dataset.armed) return true;
+  el.dataset.armed = "1"; el.textContent = "再点确认"; setTimeout(()=>{ if (el.isConnected){ delete el.dataset.armed; el.textContent = "删除"; } }, 3000);
+  return false;
+}
+
+/* ---------- 波段：图形 ---------- */
+function boxBar(s){
+  const w = s.swing, lo = w.stop, hi = w.breakout, span = hi - lo;
+  const X = v => Math.max(0, Math.min(100, (v - lo) / span * 100));
+  return `<div class="boxbar">
+      <span class="zb" style="left:${X(w.lo)}%;width:${X(w.buy_hi)-X(w.lo)}%"></span>
+      <span class="zs" style="left:${X(w.sell_lo)}%;width:${X(w.hi)-X(w.sell_lo)}%"></span>
+      <span class="edge" style="left:${X(w.lo)}%"></span><span class="edge" style="left:${X(w.hi)}%"></span>
+      <span class="dot" style="left:${X(s.price)}%"></span></div>
+    <div class="boxlab num"><span>损 ${f(w.stop,pf(s))}</span><span>破 ${f(w.breakout,pf(s))}</span></div>`;
+}
+function priceChart(s){
+  const w = s.swing, pts = w.chart; if (!pts || pts.length < 10) return "";
+  const W = 560, H = 190, L = 44, R = 10, T = 10, B = 20;
+  const vals = pts.concat([w.stop, w.breakout]);
+  const mn = Math.min(...vals) * 0.99, mx = Math.max(...vals) * 1.01;
+  const X = i => L + i/(pts.length-1)*(W-L-R), Y = v => T + (1-(v-mn)/(mx-mn))*(H-T-B);
+  const line = pts.map((v,i)=>`${X(i).toFixed(1)},${Y(v).toFixed(1)}`).join(" ");
+  const band = (a,b,c) => `<rect x="${L}" width="${W-L-R}" y="${Y(b)}" height="${Math.max(0,Y(a)-Y(b))}" fill="${c}" opacity=".14"/>`;
+  const hl = (v,c,t,dash) => `<line x1="${L}" x2="${W-R}" y1="${Y(v)}" y2="${Y(v)}" stroke="${c}" stroke-width="1" ${dash?'stroke-dasharray="4 3"':""}/><text x="${L-4}" y="${Y(v)+3}" text-anchor="end" font-size="10" fill="${c}">${f(v,pf(s))}</text>`;
+  return `<svg class="chart" viewBox="0 0 ${W} ${H}">
+    ${band(w.lo,w.buy_hi,"var(--good)")}${band(w.sell_lo,w.hi,"var(--bad)")}
+    ${hl(w.hi,"var(--bad)")}${hl(w.lo,"var(--good)")}${hl(w.stop,"var(--sub)","",1)}${hl(w.breakout,"var(--sub)","",1)}
+    <polyline fill="none" stroke="var(--brand)" stroke-width="1.6" points="${line}"/>
+    <circle cx="${X(pts.length-1)}" cy="${Y(pts[pts.length-1])}" r="3.5" fill="var(--brand)"/>
+    <text x="${L}" y="${H-5}" font-size="10" fill="var(--sub)">${esc(w.chart_from||"")}</text>
+    <text x="${W-R}" y="${H-5}" font-size="10" fill="var(--sub)" text-anchor="end">${esc(s.date)}</text>
+  </svg>
+  <div class="kv"><span style="color:var(--good)">■ 波段买入区</span><span style="color:var(--bad)">■ 波段卖出区</span><span>┅ 止损 / 突破线</span><span>前复权收盘价</span></div>`;
+}
+function btCell(bt){
+  if (!bt) return `<span class="muted small">数据不足</span>`;
+  if (!bt.n) return `<span class="muted small">近3年无信号</span>`;
+  return `<div class="small num">${bt.n} 笔 · 胜率 ${bt.win_rate}%</div><div class="small num ${sign(bt.comp)}">累计 ${bt.comp>0?"+":""}${f(bt.comp,1)}%</div>`;
+}
+function swingDetail(s, cols){
+  const w = s.swing, bt = w.bt || {}, o = swingOpen(s);
+  const trades = (bt.trades||[]).slice().reverse().map(t=>`<tr><td>${t.in}</td><td>${t.out}</td><td class="num">${f(t.buy,pf(s))}</td><td class="num">${f(t.sell,pf(s))}</td><td class="num ${sign(t.ret)}">${t.ret>0?"+":""}${f(t.ret)}%</td><td>${t.why}</td></tr>`).join("");
+  const how = w.manual ? "手动设定的区间（watchlist 里的 swing_box）"
+    : `最近 ${w.days} 个交易日横盘，下沿碰到 ${w.touch[0]} 次、上沿 ${w.touch[1]} 次；周线布林带宽度 ${f(w.bandwidth,1)}%`;
+  return `<tr class="detail"><td colspan="${cols}"><div class="dwrap">
+    <div class="dcols">
+      <div><div class="hint" style="margin-bottom:4px">${how}</div>${priceChart(s)}</div>
+      <div>
+        <div class="hint" style="margin-bottom:6px">操作规则（只针对波段仓，建议不超过这只股票计划仓位的 ${w.sleeve}%）</div>
+        <ul class="plain small">
+          <li>收盘进入 <b class="down">≤ ${f(w.buy_hi,pf(s))}</b> 且止跌（站上日线下轨、收阳）→ 买入波段仓</li>
+          <li>收盘进入 <b class="up">≥ ${f(w.sell_lo,pf(s))}</b> → 卖出波段仓（可分两笔）</li>
+          <li>收盘 <b>&lt; ${f(w.stop,pf(s))}</b> → 区间失效，卖掉波段仓，底仓不动</li>
+          <li>收盘 <b>&gt; ${f(w.breakout,pf(s))}</b> → 向上突破，停止波段、不追高</li>
+          <li>一个来回扣费后约 <b>${f(w.space,1)}%</b> 空间</li>
+        </ul>
+        ${o.shares?`<div class="small" style="margin-top:6px">当前波段持有 <b>${o.shares.toLocaleString()}</b> 股，均价 ${cur(s)}${f(o.avg,3)}，浮动 <span class="${sign(s.price-o.avg)}">${pctTxt((s.price/o.avg-1)*100)}</span></div>`:""}
+        <div class="hint" style="margin:10px 0 4px">近 3 年按同样规则回测（从 ${bt.from||"-"} 起）：${bt.n?`${bt.n} 笔，胜率 ${bt.win_rate}%，平均每笔 ${pctTxt(bt.avg)}，累计 ${pctTxt(bt.comp)}，其中止损 ${bt.stops} 笔；同期一直持有 ${pctTxt(bt.hold)}`:"没有出现过买入信号"}</div>
+        ${trades?`<div class="tw"><table class="tbl small"><thead><tr><th>买入</th><th>卖出</th><th>买价</th><th>卖价</th><th>收益</th><th>原因</th></tr></thead><tbody>${trades}</tbody></table></div>`:""}
+      </div>
+    </div>
+  </div></td></tr>`;
+}
+
+/* ---------- 滚动（波段仓主规则，借鉴吴富贵四条） ---------- */
+const ROLL_LAB = ["日线到下轨", "周线中轨~下轨", "税后股息率≥5%", "在250日线上"];
+/* 每笔 = 计划仓位 × 15%（波段仓 30% 分两笔） */
+function rollLot(s){
+  const plan = planS(s); if (!plan) return null;
+  const n = roundLot(plan * 0.15 / s.fx / s.price, s.lot);
+  return n > 0 ? {n, amt: n * s.price * s.fx} : {n: 0};
+}
+/* 止损时能不能转入底仓：A 级 + 股息率已到底仓某一档 + 底仓这一档还没买够 */
+function canXfer(s, o){
+  if (weakR(s) || !ratingOf(s) || !s.ladder || s.yield_gross == null) return null;
+  const nb = s.ladder.buy.filter(l => s.yield_gross >= l.y - 1e-9).length; if (!nb) return null;
+  const plan = planS(s); if (!plan) return null;
+  const h = holding(s), inv = h ? (h.cost ? sgd(h.shares*h.cost, s) : h.mvS) : 0;
+  const room = cumW(nb) * plan - inv;
+  return room >= sgd(o.shares * s.price, s) * 0.8 ? {nb, room} : null;
+}
+function rollState(s){
+  const R = s.roll, o = swingOpen(s);
+  if (o.shares){
+    if (R.wstop){ const x = canXfer(s, o);
+      return x ? {cls:"买入区", t:"破250 · 转入底仓", why:`周线收盘跌破 250 日线。评级 ${ratingOf(s)}，股息率已到底仓第 ${x.nb} 档且底仓还没买够：把波段仓转入底仓，不卖`, xfer:true}
+               : {cls:"跌破", t:"破250 · 卖", why:"周线收盘跌破 250 日线：卖出全部波段仓，底仓不动"}; }
+    if (R.sell) return {cls:"卖出区", t:"到上轨 · 分批卖", why:"到周线上轨：先卖一半，再涨再卖剩下的"};
+    if (R.stop) return {cls:"中部", t:"日线破250 · 盯周收盘", why:"今天收在 250 日线下，但止损看周线收盘（周五），不急着卖；不再加仓"};
+    if (o.nb < 2 && R.add2){ const L = rollLot(s);
+      return {cls:"买入确认", t:"可补第二笔", why:`再次碰到日线下轨、仍在 250 日线上：补第二笔${L&&L.n?`约 ${L.n.toLocaleString()} 股（S$${money(L.amt)}）`:L?"（15% 不足一手：第一笔已买一手的，第二笔也买一手或跳过）":""}`}; }
+    return {cls:"中部", t: o.nb >= 2 ? "两笔已满 · 等上轨" : "持有 · 等上轨", why:""};
+  }
+  if (R.buy){ const L = rollLot(s);
+    return {cls:"买入确认", t:"买第一笔", why: L ? (L.n ? `买第一笔约 ${L.n.toLocaleString()} 股（S$${money(L.amt)}，计划仓位的 15%）` : "计划仓位的 15% 不足一手：可以把两笔合成一手买，或跳过这只") : "填计划占比后算股数"}; }
+  if (R.stop) return {cls:"跌破", t:"250日线下 · 不做", why:""};
+  return {cls:"中部", t:`差 ${4-R.r.filter(Boolean).length} 条`, why:""};
+}
+function rollCard(all){
+  const xs = all.filter(s=>s.roll);
+  const held = s => swingOpen(s).shares > 0;
+  const score = s => held(s) ? 200 : s.roll.buy ? 100 : s.roll.r.filter(Boolean).length;
+  const show = xs.filter(s=>held(s) || s.roll.buy || s.roll.r.filter(Boolean).length >= 3)
+    .sort((a,b)=>score(b)-score(a) || (b.ypct??0)-(a.ypct??0));
+  const ck = v => `<span class="chk ${v?"y":"n"}">${v?"✓":"·"}</span>`;
+  const rows = show.map(s=>{
+    const R = s.roll, o = swingOpen(s), id = k(s), st = rollState(s);
+    const nw = R.new_buy || (o.shares && (R.new_sell || R.new_wstop || R.new_add2));
+    return `<tr class="row" style="cursor:default">
+      <td>${nameCell(s)}</td>
+      <td data-l="现价/涨跌" class="num">${priceCell(s)}</td>
+      <td data-l="四条规则" class="small" style="text-align:left">${R.r.map((v,i)=>`<div>${ck(v)} ${ROLL_LAB[i]}</div>`).join("")}</td>
+      <td data-l="状态" style="text-align:left;white-space:normal;min-width:180px;max-width:280px"><span class="sw ${st.cls}">${st.t}</span>${nw?'<span class="newdot" title="今天刚出现"></span>':""}${st.why?`<div class="mini">${esc(st.why)}</div>`:""}</td>
+      <td data-l="买 / 卖 / 止损" class="num small"><div class="down">买 ≤ ${f(R.dlow*1.02,pf(s))}</div><div class="up">卖 ≥ ${f(R.wup*0.98,pf(s))}</div><div class="muted">周收 &lt; ${f(R.ma250,pf(s))}</div></td>
+      <td data-l="波段持有" class="num">${o.shares?`<div>${o.shares.toLocaleString()} <span class="mini">${o.nb}/2 笔</span></div><div class="small ${sign(s.price-o.avg)}">${pctTxt((s.price/o.avg-1)*100)}</div>`:`<span class="muted">-</span>`}</td>
+      <td data-l="操作"><button class="link" data-swrec="${id}">记一笔</button>${st.xfer?`<br><button class="link" data-swxfer="${id}">转入底仓</button>`:""}</td></tr>`;
+  }).join("");
+  const nb = xs.filter(s=>s.roll.buy).length, ns = xs.filter(s=>s.roll.stop).length;
+  // 邮件名单：正在做波段的股票 vs watchlist 里的 roll_holding
+  const want = DATA.stocks.filter(held).map(s=>String(s.code));
+  const have = ((DATA.defaults||{}).roll_holding || []).map(String);
+  const same = want.length === have.length && want.every(c=>have.includes(c));
+  const mail = `<div class="small" style="padding:8px 16px 0">${same
+    ? `邮件名单已是最新${want.length?`（${want.map(esc).join("、")}）`:"（目前没有波段仓）"}：第二笔、卖出、止损邮件只发给这些`
+    : `<b>邮件名单要更新</b>：把 watchlist.yaml 里那一行改成 <code>roll_holding: [${want.map(c=>`"${esc(c)}"`).join(", ")}]</code>（现在是 [${have.map(esc).join(", ")}]）。第二笔、卖出、止损邮件只发给名单里的股票`}</div>`;
+  return `<div class="card"><div class="card-h"><h2>滚动（波段仓主规则）</h2><span class="hint">波段仓 = 计划仓位的 30%，分两笔各 15%。① 四条全满足 → 买第一笔 ② 再碰日线下轨、仍在 250 日线上 → 补第二笔 ③ 到周线上轨 → 分批卖 ④ 周线收盘跌破 250 日线 → 卖出波段仓（A 级且底仓没买够的，转入底仓）</span></div>
+    <div class="small muted" style="padding:0 16px 8px">今天 ${nb} 只四条全满足 · ${ns} 只在 250 日线下（不开新仓）· 共检查 ${xs.length} 只 · 下面列出有波段仓的和满足 ≥3 条的</div>
+    ${rows?`<div class="tw"><table class="tbl"><thead><tr><th>股票</th><th>现价/涨跌</th><th>四条规则</th><th>状态</th><th>买/卖/止损</th><th>波段持有</th><th>操作</th></tr></thead><tbody>${rows}</tbody></table></div>`
+      :`<div class="empty">今天没有接近滚动买点的股票。</div>`}
+    ${mail}
+  </div>`;
+}
+function xferToBase(id){
+  const s = DATA.stocks.find(x=>k(x)===id), o = swingOpen(s); if (!o.shares) return;
+  const h = ST.holdings[id] || {shares:0, cost:null};
+  const newSh = (h.shares||0) + o.shares;
+  // 波段那部分按今天价格计入底仓成本（盈亏已在波段记录里结算，避免重复算）
+  const cost = h.cost && h.shares ? (h.shares*h.cost + o.shares*s.price) / newSh : (h.shares ? null : s.price);
+  ST.swings.push({id: Date.now().toString(36)+Math.random().toString(36).slice(2,6), key:id, side:"sell", xfer:true,
+    date: todayStr(), price: s.price, shares: o.shares});
+  ST.holdings[id] = {shares: newSh, cost: cost ? Math.round(cost*10000)/10000 : null};
+  ST.peak[id] = Math.max(Number(ST.peak[id])||0, newSh);
+  save(); render();
+}
+
+/* ---------- 波段页 ---------- */
+const SW_ORDER = {"买入确认":0, "跌破":1, "卖出区":2, "突破":3, "买入区":4, "中部":5};
+function viewSwing(){
+  const all = filtered();
+  const act = all.filter(s=>s.swing && s.swing.active)
+    .sort((a,b)=>(SW_ORDER[a.swing.state]-SW_ORDER[b.swing.state]) || (a.swing.pos-b.swing.pos));
+  const book = swingBook();
+  const openList = DATA.stocks.filter(s=>swingOpen(s).shares);
+  const openMV = openList.reduce((a,s)=>a+sgd(swingOpen(s).shares*s.price,s),0);
+  const openPnl = openList.reduce((a,s)=>{const o = swingOpen(s); return a+sgd(o.shares*s.price-o.cost,s);},0);
+  const cols = 9;
+  const rows = act.map(s=>{
+    const w = s.swing, id = k(s), o = swingOpen(s);
+    return `<tr class="row ${OPEN.has(id)?"open":""}" data-id="${id}">
+      <td>${nameCell(s)}</td>
+      <td data-l="现价/涨跌" class="num">${priceCell(s)}</td>
+      <td data-l="区间" class="num"><div>${f(w.lo,pf(s))}–${f(w.hi,pf(s))}</div><div class="small muted">宽 ${f(w.width,1)}%${w.days?` · ${w.days}天`:" · 手动"}</div></td>
+      <td data-l="位置">${boxBar(s)}</td>
+      <td data-l="状态"><span class="sw ${w.state}">${w.state}</span>${w.new?'<span class="newdot" title="今天刚出现"></span>':""}</td>
+      <td data-l="买 / 卖 / 止损" class="num small"><div class="down">买 ≤ ${f(w.buy_hi,pf(s))}</div><div class="up">卖 ≥ ${f(w.sell_lo,pf(s))}</div><div class="muted">损 &lt; ${f(w.stop,pf(s))}</div></td>
+      <td data-l="回测（近3年）">${btCell(w.bt)}</td>
+      <td data-l="波段持有" class="num">${o.shares?`<div>${o.shares.toLocaleString()}</div><div class="small ${sign(s.price-o.avg)}">${pctTxt((s.price/o.avg-1)*100)}</div>`:`<span class="muted">-</span>`}</td>
+      <td data-l="操作"><button class="link" data-swrec="${id}">记一笔</button></td>
+    </tr>${OPEN.has(id)?swingDetail(s,cols):""}`;
+  }).join("");
+  const others = all.filter(s=>!(s.swing && s.swing.active));
+  const bts = all.map(s=>s.swing && s.swing.bt).filter(b=>b && b.n);
+  const btN = bts.reduce((a,b)=>a+b.n,0), btW = bts.reduce((a,b)=>a+b.wins,0);
+  const btAvg = btN ? bts.reduce((a,b)=>a+b.avg*b.n,0)/btN : null;
+  const btLine = btN ? `近 3 年按同样规则回测，${bts.length} 只股票合计 ${btN} 笔：胜率 ${Math.round(btW/btN*100)}%，平均每笔 <b class="${sign(btAvg)}">${pctTxt(btAvg)}</b>（已扣费用）。${btAvg>=1?"整体为正，但要看具体股票的回测，只在回测好的股票上做。":btAvg>0?"基本打平：扣费后几乎没多赚，只在回测明显为正的股票上做。":"整体为负：多数“区间”最后被打破，波段要非常克制。"}` : "";
+  const ledger = book.trades.slice(0,30).map(t=>`<tr class="row" style="cursor:default">
+      <td>${t.s?nameCell(t.s):esc(t.key)}</td>
+      <td data-l="日期" class="num">${t.date}</td>
+      <td data-l="方向"><span class="sw ${t.side==="buy"?"买入区":"卖出区"}">${t.side==="buy"?"买入":t.xfer?"转入底仓":"卖出"}</span></td>
+      <td data-l="价格" class="num">${t.s?cur(t.s):""}${f(t.price,3)}</td>
+      <td data-l="股数" class="num">${Number(t.shares).toLocaleString()}</td>
+      <td data-l="已实现" class="num ${sign(t.real)}">${t.real==null?"-":(t.real>0?"+":"−")+(t.s?cur(t.s):"")+money(Math.abs(t.real))}</td>
+      <td data-l="操作"><button class="link" data-swdel="${t.id}">删除</button></td></tr>`).join("");
+  return `<div class="stats">
+      <div class="card stat"><div class="l">横盘中的股票</div><div class="v num">${act.length}</div><div class="s">${act.filter(s=>s.swing.state==="买入确认").length} 只买入确认 · ${act.filter(s=>s.swing.state==="卖出区").length} 只在卖出区</div></div>
+      <div class="card stat"><div class="l">波段持仓</div><div class="v num">S$${money(openMV)}</div><div class="s num">浮动 <span class="${sign(openPnl)}">${openPnl>0?"+":""}S$${money(openPnl)}</span></div></div>
+      <div class="card stat"><div class="l">今年已实现</div><div class="v num ${sign(book.ytdS)}">${book.ytdS>0?"+":""}S$${money(book.ytdS)}</div><div class="s">${book.ytdN} 笔卖出（未扣费用）</div></div>
+      <div class="card stat"><div class="l">累计已实现</div><div class="v num ${sign(book.allS)}">${book.allS>0?"+":""}S$${money(book.allS)}</div><div class="s">半年后对比“一直持有”，不如就停</div></div>
+    </div>
+    ${rollCard(all)}
+    <div class="card"><div class="card-h"><h2>横盘区间（补充）</h2><span class="hint">自动识别：横盘 ≥3 个月、上下沿各碰 ≥2 次、周线布林带宽 ≤20%、均线走平 · 点行看走势图和回测</span>${mktSeg()}</div>
+      ${act.length?`<div class="tw"><table class="tbl"><thead><tr><th>股票</th><th>现价/涨跌</th><th>区间</th><th>位置</th><th>状态</th><th>买/卖/止损</th><th>回测</th><th>波段持有</th><th>操作</th></tr></thead><tbody>${rows}</tbody></table></div>`
+        :`<div class="empty">目前没有识别到横盘的股票。可以在 watchlist 里用 swing_box 手动画区间。</div>`}
+    </div>
+    <div class="card"><div class="card-h"><h2>波段记录</h2><span class="hint">按先买先卖计算已实现盈亏；波段持仓会计入“配置”页的仓位</span></div>
+      ${ledger?`<div class="tw"><table class="tbl"><thead><tr><th>股票</th><th>日期</th><th>方向</th><th>价格</th><th>股数</th><th>已实现</th><th></th></tr></thead><tbody>${ledger}</tbody></table></div>`
+        :`<div class="empty">还没有记录。在上表点“记一笔”。</div>`}
+    </div>
+    <div class="card"><div class="card-b small">
+      ${btLine?`<div style="margin-bottom:8px">${btLine}</div>`:""}<b>纪律</b>：波段仓不超过该股计划仓位的 30%，以“滚动”四条规则为主、横盘区间为补充，底仓只按股息率网格操作，波段卖光也不动底仓 · 只在“买入确认”时买，不在区间中部操作 · 跌破止损线当天卖、不等反弹 · 突破后不追高 ·
+      其余 ${others.length} 只当前不在横盘（处于趋势中），不做波段。
+    </div></div>`;
+}
+function openSwing(id){
+  const s = DATA.stocks.find(x=>k(x)===id); editing = s;
+  const o = swingOpen(s), w = s.swing || {};
+  $("#sTitle").textContent = `记一笔波段 · ${s.name}`;
+  $("#sPriceLab").textContent = `成交价（${s.qccy}）`;
+  $("#sSide").value = o.shares && w.state === "卖出区" ? "sell" : "buy";
+  $("#sDate").value = new Date().toISOString().slice(0,10);
+  $("#sPrice").value = s.price; $("#sShares").value = o.shares && w.state === "卖出区" ? o.shares : "";
+  $("#sdlg").returnValue = ""; $("#sdlg").showModal();
+}
+$("#sdlg").addEventListener("close", ()=>{
+  if ($("#sdlg").returnValue !== "save" || !editing) return;
+  const price = parseFloat($("#sPrice").value), shares = parseFloat($("#sShares").value);
+  if (!(price > 0 && shares > 0)) return;
+  ST.swings.push({id: Date.now().toString(36) + Math.random().toString(36).slice(2,6), key: k(editing),
+    side: $("#sSide").value, date: $("#sDate").value || new Date().toISOString().slice(0,10), price, shares});
+  save(); render();
+});
+
+/* ---------- 分批建仓 / 减仓建议 ---------- */
+const LADDER_W = {pyramid:[0.2,0.3,0.5], equal:[1/3,1/3,1/3], front:[0.5,0.25,0.25]};
+/* 第一笔 50%，第 2、3 档各 25%：经验上大部分股票只会到第 1 档，先多买；候选超额 3 倍让资金能投满 */
+const ladderMode = () => "front";
+const OVER = 3, CASH_MIN = () => Number((DATA.limits||{}).cash_min ?? 8);
+const cumW = nb => LADDER_W[ladderMode()].slice(0, nb).reduce((a,b)=>a+b, 0);
+const todayStr = () => new Date().toISOString().slice(0,10);
+/* 公司评级（借鉴吴富贵）：A+ 有分红+业绩涨 / A- 横盘 / B 跌 / B- 差。B 及以下：计划占比按一半，跌破 250 日线时只买第 1 档 */
+const RATING_TXT = {"A+":"有分红 + 业绩增长", "A-":"有分红 + 业绩横盘", "B":"有分红 + 业绩下滑", "B-":"有分红 + 业绩差"};
+const ratingOf = s => ST.rating[k(s)] || s.rating || "";
+const weakR = s => /^B/.test(ratingOf(s));
+/* 价位到了之后的过滤：周线跌破下轨 → 等止跌；在周线中轨上方 → 等回到中轨下；跌破 250 日线且评级 B 及以下 → 只到第 1 档 */
+function gate(s, nb){
+  const g = {nb, raw: nb};
+  if (!nb) return g;
+  if (s.wbreak){ g.wait = "wbreak"; return g; }
+  const wm = s.boll && s.boll.w ? s.boll.w[1] : null;
+  if (wm && s.price > wm){ g.wait = "wmid"; g.wm = wm; return g; }
+  if (s.below250 && weakR(s) && nb > 1){ g.nb = 1; g.capped250 = true; }
+  return g;
+}
+/* 评级调整计划占比：A+ ×1.2，A− 不变，B / B− 减半；调整后不超过单只上限 */
+const RATING_MUL = {"A+":1.2, "A-":1, "B":0.5, "B-":0.5};
+const ratingMul = s => RATING_MUL[ratingOf(s)] ?? 1;
+const planPctEff = s => { const p = Number(ST.planPct[k(s)]) || 0; return Math.min(p * ratingMul(s), (DATA.limits||{}).stock || 15); };
+function planS(s){ const p = planPctEff(s); if (!p) return 0; const P = portfolio(); return p/100 * (isA(s) ? P.a.total : P.total); }
+function migratePlans(){   // 旧版“计划仓位（新币）”换算成占总资产的 %
+  const old = Object.entries(ST.plans || {}); if (!old.length) return;
+  const tot = portfolio().total; if (!tot) return;
+  old.forEach(([id,v])=>{ if (!ST.planPct[id]) ST.planPct[id] = Math.round(Number(v)/tot*1000)/10; });
+  ST.plans = {}; save();
+}
+function roundLot(n, lot){ return lot ? Math.floor(n / lot) * lot : Math.floor(n); }
+/* 同一部分的买入额度：按股息率分位从高到低（最便宜的先）分配，不超过该部分目标和单只上限 */
+let ALLOC = {};
+function computeAlloc(){
+  const P = portfolio(), T = targets(), cap = (DATA.limits||{}).stock || 15, out = {}, byB = {};
+  DATA.stocks.forEach(s=>{
+    const L = s.ladder; if (!L || s.yield_gross == null) return;
+    const g = gate(s, L.buy.filter(l => s.yield_gross >= l.y - 1e-9).length); if (!g.nb || g.wait) return;
+    const nb = g.nb;
+    const plan = planS(s); if (!plan) return;
+    const h = holding(s), inv = h ? (h.cost ? sgd(h.shares*h.cost, s) : h.mvS) : 0;
+    const gap = cumW(nb) * plan - inv; if (gap <= 0) return;
+    const deep = nb >= 2 ? Math.max(0, cumW(nb) * plan - Math.max(inv, cumW(1) * plan)) : 0;   // 第 2、3 档那部分，可动用现金垫
+    const base = isA(s) ? P.a.total : P.total;
+    const stockRoom = base ? cap/100 * base - (h ? h.mvS : 0) : gap;
+    (byB[s.bucket] ||= []).push({s, gap, stockRoom, deep});
+  });
+  Object.entries(byB).forEach(([b, list])=>{
+    let room = b === "A股" ? P.a.cash : (T[b] != null ? Number(T[b])/100 * P.total - (P.byB[b]||0) : Infinity);
+    list.sort((x,y)=>(y.s.ypct ?? -1) - (x.s.ypct ?? -1));
+    list.forEach(({s, gap, stockRoom, deep})=>{
+      let amt = Math.min(gap, Math.max(0, stockRoom)), why = amt < gap ? "单只上限" : "";
+      if (amt > room){ amt = Math.max(0, room); why = b === "A股" ? "A股账户现金不够" : `“${b}”这部分额度已用完（先给了股息率分位更高的）`; }
+      room -= amt; out[k(s)] = {amt, why, gap, deep, cap: Math.min(gap, Math.max(0, stockRoom)), A: b === "A股"};
+    });
+  });
+  /* 第 2、3 档机会少：部分额度用完时，可以动用新币账户的现金垫，但现金最少留 CASH_MIN% */
+  const used = Object.values(out).filter(o=>!o.A).reduce((a,o)=>a+o.amt, 0);
+  // 现金垫只算“现金目标 − 最低现金”那一段（默认 15% − 8% = 7%），不占用其他部分还没投的额度
+  const cashT = Number(T["现金"] ?? 15);
+  let extra = Math.max(0, Math.min(P.cash - CASH_MIN()/100 * P.total - used, (cashT - CASH_MIN())/100 * P.total));
+  Object.entries(out).filter(([id,o])=>!o.A && o.deep > 0 && o.amt < o.cap)
+    .sort((x,y)=>((DATA.stocks.find(s=>k(s)===y[0])||{}).ypct ?? -1) - ((DATA.stocks.find(s=>k(s)===x[0])||{}).ypct ?? -1))
+    .forEach(([id,o])=>{
+      const add = Math.min(o.cap - o.amt, o.deep, extra); if (add <= 0) return;
+      o.amt += add; extra -= add; o.cushion = add;
+      o.why = o.amt >= o.cap - 1e-6 ? `第 2、3 档机会少，动用了现金垫 S$${money(add)}（现金仍保留 ≥ ${CASH_MIN()}%）` : o.why + `；已动用现金垫 S$${money(add)}，现金最低 ${CASH_MIN()}%`;
+    });
+  return out;
+}
+function advice(s){
+  const L = s.ladder; if (!L || s.yield_gross == null) return null;
+  const id = k(s), W = LADDER_W[ladderMode()], yg = s.yield_gross, lot = s.lot;
+  const h = holding(s), shares = h ? h.shares : 0;
+  const plan = planS(s), planPct = planPctEff(s);
+  const G = gate(s, L.buy.filter(l => yg >= l.y - 1e-9).length), nb = G.nb;
+  const ns = L.sell.filter(l => yg <= l.y + 1e-9).length;
+  const nextBuy = L.buy[nb], nextSell = L.sell[ns];
+  const out = {nb, ns, plan, planPct, W, nextBuy, nextSell, G};
+  if (nb > 0){
+    const cum = W.slice(0, nb).reduce((a,b)=>a+b, 0);
+    out.type = "buy"; out.cum = cum;
+    if (G.wait === "wbreak"){
+      out.type = "hold"; out.short = "等止跌";
+      out.text = `第 ${nb} 档价位到了，但周线跌破布林下轨还在下跌：等收盘重新站上周线下轨（约 ${cur(s)}${f(s.boll.w[0],pf(s))}）再买`;
+      return out;
+    }
+    if (G.wait === "wmid"){
+      out.type = "hold"; out.short = "等回中轨下";
+      out.text = `第 ${nb} 档股息率到了，但价格还在周线布林中轨上方（中轨约 ${cur(s)}${f(G.wm,pf(s))}）：等跌回中轨下再买，不追涨`;
+      return out;
+    }
+    if (!plan){ out.text = `第 ${nb} 档：累计应建到计划仓位的 ${Math.round(cum*100)}%`; out.short = `第${nb}档 · 建到 ${Math.round(cum*100)}%`; out.needPlan = true; return out; }
+    const al = ALLOC[id] || {amt: 0, why: "", gap: 0};
+    let gap = al.amt; out.capped = al.cushion && al.amt >= al.cap - 1e-6 ? "" : al.why; out.cushion = al.cushion ? al.why : "";
+    const lotS = lot ? sgd(lot * s.price, s) : null;
+    let n = roundLot(gap / s.fx / s.price, lot);
+    if (lot && n === 0 && gap >= 0.8 * lotS) n = lot;          // 额度已覆盖八成以上一手，就买一手（略超一点额度）
+    out.amount = n * s.price * s.fx; out.shares = n;
+    if (n <= 0){
+      out.type = "hold"; out.text = `第 ${nb} 档已建够（计划的 ${Math.round(cum*100)}%）`; out.short = "本档已建够";
+      if (G.capped250){ out.text = `股息率已到第 ${G.raw} 档，但股价在 250 日线下、公司评级 ${ratingOf(s)}：暂停第 2、3 档，第 1 档已建够`; out.short = "暂停加仓"; }
+      if (lot && gap > 0){ out.text = `第 ${nb} 档：这次可投约 S$${money(gap)}，不足一手（一手约 S$${money(lotS)}），等额度够了或下一档再买`; out.short = "不足一手"; }
+      if (al.why && al.gap > 0){ out.text = `第 ${nb} 档价位到了，但暂不买：${al.why}`; out.short = "额度已满"; }
+      return out;
+    }
+    out.text = `第 ${nb} 档：建议买入约 S$${money(out.amount)}（${n.toLocaleString()} 股${lot?`，${n/lot} 手`:""}），累计到计划的 ${Math.round(cum*100)}%`;
+    out.short = `买 S$${money(out.amount)}`;
+    if (G.capped250) out.text += `；股息率已到第 ${G.raw} 档，但股价在 250 日线下、公司评级 ${ratingOf(s)}，只建到第 1 档，站回 250 日线或评级回到 A 再加`;
+    if (ratingMul(s) !== 1) out.text += `；评级 ${ratingOf(s)}，计划仓位按 ${ratingMul(s)} 倍算`;
+    if (out.capped) out.text += `；金额已调低：${out.capped}`;
+    if (out.cushion && !out.capped) out.text += `；${out.cushion}`;
+    if (Number(ST.cash) && out.amount > Number(ST.cash)) out.text += `；现金垫只剩 S$${money(ST.cash)}`;
+    return out;
+  }
+  if (ns > 0 && shares > 0){
+    const peak = Math.max(Number(ST.peak[id]) || 0, shares);
+    const keep = ns >= 2 ? 1/3 : 2/3, target = peak * keep;
+    const n = roundLot(shares - target, lot);
+    out.type = n > 0 ? "sell" : "hold";
+    if (n > 0){
+      out.shares = n; out.amount = n * s.price * s.fx;
+      out.text = `减仓第 ${ns} 档：建议卖出 ${n.toLocaleString()} 股（约 S$${money(out.amount)}），保留最高持股的 ${ns>=2?"1/3（底仓）":"2/3"}`;
+      out.short = `卖 ${n.toLocaleString()} 股`;
+    } else { out.text = `减仓第 ${ns} 档已减到位，剩下的作为底仓`; out.short = "已减到位"; }
+    return out;
+  }
+  out.type = "hold";
+  const nb1 = L.buy[0], s1 = L.sell[0];
+  if (ns > 0){ out.text = `减仓区，偏贵：没持有就先不买，跌到 ${cur(s)}${f(nb1.price,pf(s))}（税后 ${f(nb1.yn)}%）再开始买`; out.short = "偏贵，不买"; return out; }
+  out.text = `持有区：跌到 ${cur(s)}${f(nb1.price,pf(s))}（税后 ${f(nb1.yn)}%）开始买，涨到 ${cur(s)}${f(s1.price,pf(s))}（税后 ${f(s1.yn)}%）开始减`;
+  out.short = "持有";
+  return out;
+}
+function adviceCell(s){
+  const a = advice(s); if (!a) return `<span class="muted small">-</span>`;
+  const cls = a.type === "buy" ? "买入确认" : a.type === "sell" ? "跌破" : "中部";
+  let nxt = a.type === "sell" || (a.ns > 0) ? (a.nextSell ? `下一档 ≥ ${f(a.nextSell.price,pf(s))}` : "")
+    : (a.nextBuy ? `下一档 ≤ ${f(a.nextBuy.price,pf(s))}` : "已到最后一档");
+  if (a.G && a.G.wait === "wbreak") nxt = `收盘站上 ${f(s.boll.w[0],pf(s))} 再买（已到第 ${a.G.raw} 档）`;
+  else if (a.G && a.G.wait === "wmid") nxt = `跌回 ≤ ${f(a.G.wm,pf(s))} 再买（已到第 ${a.G.raw} 档）`;
+  else if (a.G && a.G.capped250) nxt = `第 ${a.G.raw} 档也已到价，但评级 ${ratingOf(s)}、在 250 日线下，暂停加仓`;
+  return `<span class="sw ${cls}">${esc(a.short)}</span>${a.needPlan?`<div class="mini">填计划占比后算金额</div>`:""}<div class="mini num">${nxt}</div>`;
+}
+function ladderBox(s){
+  const a = advice(s), L = s.ladder; if (!a || !L) return "";
+  const yg = s.yield_gross, W = a.W;
+  let cum = 0;
+  const buyRows = L.buy.map((l,i)=>{ cum += W[i]; const hit = yg >= l.y - 1e-9;
+    const basis = s.mode === "分位" ? ["中位数（税后≥"+(DATA.floor_net??4.5)+"%）","80 分位","90 分位"][i] : ["买入线−0.5","买入线","买入线+0.5"][i];
+    return `<tr><td><span class="sw ${hit?"买入确认":"买入区"}">买 ${i+1}</span><div class="mini">${basis}</div></td><td class="num">${cur(s)}${f(l.price,pf(s))}</td><td class="num">${f(l.yn)}%</td>
+      <td class="num">${Math.round(W[i]*100)}% → 累计 ${Math.round(cum*100)}%${a.plan?`<div class="mini">S$${money(a.plan*W[i])}</div>`:""}</td><td class="num small">${hit?"已达":"需跌 "+f((1-l.price/s.price)*100,1)+"%"}</td></tr>`; }).join("");
+  const sellRows = L.sell.map((l,i)=>{ const hit = yg <= l.y + 1e-9;
+    return `<tr><td><span class="sw ${hit?"跌破":"卖出区"}">减 ${i+1}</span><div class="mini">${s.mode==="分位"?["20 分位","10 分位"][i]:["减仓线","减仓线−0.5"][i]}</div></td><td class="num">${cur(s)}${f(l.price,pf(s))}</td><td class="num">${f(l.yn)}%</td>
+      <td class="num">卖 1/3 → 保留 ${i===0?"2/3":"1/3"}</td><td class="num small">${hit?"已达":"需涨 "+f((l.price/s.price-1)*100,1)+"%"}</td></tr>`; }).join("");
+  return `<div style="margin-bottom:12px">
+    <div class="hint" style="margin-bottom:6px">分批计划（第一笔 50%、第 2、3 档各 25%，按近 ${s.win_years||10} 年股息率分布）${a.plan?` · 计划占总资产 ${f(a.planPct,1)}%${ratingMul(s)!==1?`（填的 ${f(Number(ST.planPct[k(s)])||0,1)}% × 评级 ${ratingOf(s)} ${ratingMul(s)} 倍）`:""}，现在约 S$${money(a.plan)}（更新现金后自动调整）`:` · <button class="link" data-edit="${k(s)}">填计划占比</button>`}</div>
+    <div class="warnbox ${a.type==="sell"?"bad":a.type==="buy"?"ok":""}" style="${a.type==="hold"?"background:var(--soft);color:var(--ink)":""}">${esc(a.text)}</div>
+    <div class="tw"><table class="tbl small"><thead><tr><th>档位</th><th>价格</th><th>税后股息率</th><th>仓位</th><th>距离</th></tr></thead><tbody>${buyRows}${sellRows}</tbody></table></div>
+    <div class="mini" style="margin-top:4px">剩下 1/3 作为底仓长期持有；单只超过组合 ${(DATA.limits||{}).stock||15}% 时减回 12% 左右；每次加仓前先确认分红没有削减。</div>
+  </div>`;
+}
+
+/* ---------- 组合计算（新币） ---------- */
+const isA = s => s.bucket === "A股";      // A股用内地账户的另一笔资金，单独计算
+function portfolio(){
+  const held = DATA.stocks.map(s=>({s,h:holding(s)})).filter(x=>x.h && !isA(x.s));
+  const cash = Number(ST.cash) || 0;
+  let mv = 0, cost = 0, div = 0, pnl = 0, hasCost = false;
+  const byB = {}, bySec = {}, byStock = [];
+  held.forEach(({s,h})=>{
+    mv += h.mvS; div += h.divS;
+    if (h.cost){ cost += sgd(h.shares*h.cost, s); pnl += sgd(h.pnl, s); hasCost = true; }
+    byB[s.bucket] = (byB[s.bucket]||0) + h.mvS;
+    bySec[s.sector] = (bySec[s.sector]||0) + h.mvS;
+    byStock.push([s.name, h.mvS]);
+  });
+  DATA.stocks.forEach(s=>{
+    if (isA(s)) return;
+    const o = swingOpen(s); if (!o.shares) return;
+    const m = sgd(o.shares * s.price, s);
+    mv += m; div += sgd(o.shares * s.dps_net, s);
+    cost += sgd(o.cost, s); pnl += sgd(o.shares * s.price - o.cost, s); hasCost = true;
+    byB[s.bucket] = (byB[s.bucket]||0) + m;
+    bySec[s.sector] = (bySec[s.sector]||0) + m;
+    const ex = byStock.find(x=>x[0]===s.name); if (ex) ex[1] += m; else byStock.push([s.name, m]);
+  });
+  const total = mv + cash;
+  byB["现金"] = cash;
+  let aMv = 0, aDiv = 0;
+  DATA.stocks.filter(isA).forEach(s=>{ const h = holding(s); if (h){ aMv += h.mvS; aDiv += h.divS; } const o = swingOpen(s); if (o.shares) aMv += sgd(o.shares*s.price, s); });
+  const aCash = (Number(ST.aCash) || 0) * (DATA.fx.CNY || 0.18);
+  const a = {mv: aMv, cash: aCash, total: aMv + aCash, div: aDiv};
+  return {held, cash, mv, total, cost, div, pnl: hasCost ? pnl : null, byB, bySec, byStock, a};
+}
+function checks(P){
+  const L = DATA.limits || {}, T = targets(), out = [];
+  if (!P.total) return out;
+  P.byStock.forEach(([n,v])=>{ if (v/P.total*100 > (L.stock||15)) out.push(`${n} 占 ${f(v/P.total*100,1)}%，超过单只上限 ${L.stock||15}%`); });
+  Object.entries(P.bySec).forEach(([n,v])=>{ if (v/P.total*100 > (L.sector||35)) out.push(`行业「${n}」占 ${f(v/P.total*100,1)}%，超过上限 ${L.sector||35}%`); });
+  Object.entries(T).forEach(([b,t])=>{ const a = (P.byB[b]||0)/P.total*100; if (Math.abs(a-t) >= 5) out.push(`${b} 实际 ${f(a,1)}%，目标 ${t}%，${a>t?"超配":"低配"} ${f(Math.abs(a-t),1)} 个百分点`); });
+  return out;
+}
+
+/* ---------- 每月更新现金 + 各部分可投入金额 ---------- */
+function daysSince(d){ return d ? Math.floor((Date.now() - new Date(d+"T00:00:00").getTime())/864e5) : null; }
+function monthlyCard(P, T){
+  const log = ST.cashLog || [], last = log[log.length-1], prev = log[log.length-2];
+  const age = last ? daysSince(last.date) : null;
+  const TT = Object.entries(T).filter(([b,t])=>b !== "A股" && (Number(t)>0 || (P.byB[b]||0)>0));
+  const rows = TT.map(([b,t])=>{
+    const tgt = t/100 * P.total, have = P.byB[b] || 0;
+    const alloc = DATA.stocks.filter(s=>s.bucket===b).reduce((a,s)=>a+(Number(ST.planPct[k(s)])||0),0);
+    const room = b === "现金" ? have - tgt : tgt - have;
+    return `<tr class="row" style="cursor:default"><td>${esc(b)}</td><td data-l="目标" class="num">${t}% · S$${money(tgt)}</td>
+      <td data-l="现在" class="num">S$${money(have)}<div class="mini">${P.total?f(have/P.total*100,1):"-"}%</div></td>
+      <td data-l="已分给个股的计划" class="num">${b==="现金"?"-":f(alloc,1)+"%"}${b!=="现金"&&alloc>t*(OVER+0.2)?' <span class="pend">超额太多</span>':(b!=="现金"&&alloc>t?`<div class="mini">候选超额 ${f(alloc/t,1)} 倍，先到先得</div>`:"")}</td>
+      <td data-l="${b==="现金"?"现金垫以外":"还可投入"}" class="num">${b==="现金"?(room>0?`<b>S$${money(room)}</b><div class="mini">待投入资金</div>`:`<span class="pend">低于现金垫 S$${money(-room)}</span>`):(room>0?`S$${money(room)}`:`<span class="muted">已满</span>`)}</td></tr>`;
+  }).join("");
+  const delta = last && prev ? last.cash - prev.cash : null;
+  const split = delta && delta > 0 ? TT.filter(([b,t])=>Number(t)>0).map(([b,t])=>`${esc(b)} +S$${money(delta*t/100)}`).join(" · ") : "";
+  return `<div class="card"><div class="card-h"><h2>每月更新</h2><span class="hint">工资结余进来后，更新一次现金余额（一个月或两三个月一次都可以）</span>
+      <span style="margin-left:auto" class="alloc small">现金余额 S$ <input type="number" id="cashIn" value="${P.cash}" min="0" step="100" style="width:110px"></span></div>
+    <div class="card-b small">
+      ${last?`上次更新 <b>${last.date}</b>（${age} 天前）${age>35?' <span class="pend">已超过一个月，记得更新</span>':""}${delta!=null?` · 比上次 ${delta>=0?"+":"−"}S$${money(Math.abs(delta))}`:""}`:'<span class="pend">还没记录过现金余额</span>'}
+      ${split?`<div style="margin-top:4px">这笔新增按目标比例相当于：${split}。股票部分不用马上买完，等进入买入区再按档投入（第一笔 50%，后两档各 25%）。</div>`:""}
+    </div>
+    <div class="tw"><table class="tbl"><thead><tr><th>部分</th><th>目标</th><th>现在</th><th>已分给个股的计划</th><th>还可投入</th></tr></thead><tbody>${rows}</tbody></table></div>
+    <div class="card-b small" style="border-top:1px solid var(--line)"><b>A股账户（东方财富，另一笔资金）</b>
+      <span class="alloc" style="margin-left:8px">现金 ¥ <input type="number" id="aCashIn" value="${Number(ST.aCash)||0}" min="0" step="1000" style="width:110px"></span>
+      <div class="mini" style="margin-top:4px">A股总额约 ¥${money(P.a.total / (DATA.fx.CNY||0.18))}（持仓 ¥${money(P.a.mv/(DATA.fx.CNY||0.18))} + 现金 ¥${money(Number(ST.aCash)||0)}）。A股的计划占比按这个账户的总额计算，不计入上面的新币账户。</div></div>
+    <div class="card-b mini">每只股票的计划金额 = 计划占比 × 所在账户的总资产。同一部分里，候选股的计划占比加起来可以到目标的 3 倍左右（大部分股票只会到第 1 档，候选多才能把钱投出去）：同时有几只进入买入区时，看板按股息率分位从高到低（最便宜的先）分配，到目标比例就停。第 2、3 档机会少，部分额度用完时可以动用现金垫，现金最少留 ${CASH_MIN()}%。总资产随工资结余变大，计划金额和每档该买多少会自动变大，不用手动改。现金超过 ${T["现金"]||15}% 的部分是待投入资金，只在股票进入买入区时使用。</div>
+  </div>`;
+}
+
+/* ---------- 配置 ---------- */
+function viewAlloc(){
+  const P = portfolio(), T = targets();
+  const tsum = Object.values(T).reduce((a,b)=>a+Number(b||0),0);
+  const bucketRows = Object.keys(T).map(b=>{
+    const a = P.total ? (P.byB[b]||0)/P.total*100 : 0, t = Number(T[b]||0);
+    return `<div class="brow"><div class="t"><span>${esc(b)} <span class="muted num">S$${money(P.byB[b]||0)}</span></span>
+      <span class="num alloc">实际 <b>${f(a,1)}%</b> · 目标 <input type="number" data-target="${esc(b)}" value="${t}" min="0" max="100">%</span></div>
+      <div class="b"><i class="${a>t+5?"over":""}" style="width:${Math.min(100,a).toFixed(1)}%"></i><span class="tg" style="left:${t}%"></span></div></div>`;
+  }).join("");
+  const bars = arr => arr.sort((a,b)=>b[1]-a[1]).map(([n,v])=>`<div class="brow"><div class="t"><span>${esc(n)}</span><span class="num">${f(v/P.total*100,1)}%</span></div><div class="b"><i style="width:${(v/P.total*100).toFixed(1)}%"></i></div></div>`).join("");
+  const warn = checks(P);
+  return `<div class="stats">
+      <div class="card stat"><div class="l">总资产（新币，含现金）</div><div class="v num">S$${money(P.total)}</div><div class="s num">股票 S$${money(P.mv)} · 现金 S$${money(P.cash)}</div></div>
+      <div class="card stat"><div class="l">浮动盈亏</div><div class="v num ${sign(P.pnl)}">${P.pnl==null?"-":(P.pnl>0?"+":"")+"S$"+money(P.pnl)}</div><div class="s num">${P.cost?"股票成本 S$"+money(P.cost):"未录入成本"}</div></div>
+      <div class="card stat"><div class="l">年股息（税后）</div><div class="v num">S$${money(P.div)}</div><div class="s num">约每月 S$${money(P.div/12)}</div></div>
+      <div class="card stat"><div class="l">股息率</div><div class="v num">${P.mv?f(P.div/P.mv*100):"-"}%</div><div class="s num">股票部分${P.total?" · 含现金 "+f(P.div/P.total*100)+"%":""}${P.cost?" · 成本口径 "+f(P.div/P.cost*100)+"%":""}</div></div>
+    </div>
+    ${monthlyCard(P, T)}
+    <div class="card"><div class="card-h"><h2>仓位 vs 目标</h2><span class="hint">竖线是目标；偏离 ≥5 个百分点会提示。目标合计 ${tsum}%${tsum!==100?' <span class="pend">（应为 100%）</span>':""}</span>
+</div>
+      <div class="bars">${bucketRows}</div>
+      <div style="padding:0 16px 14px">${warn.length?warn.map(w=>`<div class="warnbox bad">⚠ ${esc(w)}</div>`).join(""):(P.total?`<div class="warnbox ok">✓ 仓位和集中度都在范围内</div>`:"")}</div>
+    </div>
+    ${P.held.length?`<div class="two">
+      <div class="card"><div class="card-h"><h2>个股占比</h2><span class="hint">上限 ${(DATA.limits||{}).stock||15}%</span></div><div class="bars">${bars(P.byStock)}</div></div>
+      <div class="card"><div class="card-h"><h2>行业占比</h2><span class="hint">上限 ${(DATA.limits||{}).sector||35}%</span></div><div class="bars">${bars(Object.entries(P.bySec))}</div></div>
+    </div>`:`<div class="card"><div class="empty">还没有录入持仓。到“持仓看板”点“录入持仓”。</div></div>`}
+    <div class="card"><div class="card-h"><h2>本机数据</h2><span class="hint">持仓、现金、目标、复盘笔记都只存在这台设备的浏览器。换设备时先导出，再在另一台导入。</span>
+      <div style="margin-left:auto;display:flex;gap:6px"><button class="btn" id="exp">导出</button><button class="btn" id="imp">导入</button></div></div></div>
+    <div class="note">换算汇率：1 CNY = S$${f(DATA.fx.CNY,4)} · 1 HKD = S$${f(DATA.fx.HKD,4)}</div>`;
+}
+
+/* ---------- 周复盘 ---------- */
+function weekKey(d = new Date()){
+  const t = new Date(Date.UTC(d.getFullYear(), d.getMonth(), d.getDate()));
+  const day = t.getUTCDay() || 7; t.setUTCDate(t.getUTCDate() + 4 - day);
+  const y0 = new Date(Date.UTC(t.getUTCFullYear(),0,1));
+  return `${t.getUTCFullYear()}-W${String(Math.ceil(((t-y0)/864e5+1)/7)).padStart(2,"0")}`;
+}
+const CHECKS = [
+  "看完上面“本周要处理”的每一条，决定执行 / 不执行，并写下理由",
+  "仓位和集中度：按“配置”页提示，需要调整的写进笔记（偏离不大就不动）",
+  "分红公告：持仓股本周有无宣布分红、削减或暂停（有变化就更新 watchlist 的 dps 或移出）",
+  "计划价：有没有需要新增、修改或删除的计划",
+  "现金：现金垫是否还够至少两次加仓；不够就暂停新开仓",
+  "情绪检查：这周有没有想追涨或恐慌卖出？写下来，下周回看",
+  "波段：滚动仓到周线上轨的分批卖了没；跌破 250 日线的停止滚动；区间被打破的照规则处理；本周买卖都已“记一笔”",
+  "评级：本周有财报的持仓/候选，按“分红 + 业绩”更新评级（A+ 涨 / A− 平 / B 跌 / B− 差），在编辑窗口里改",
+  "每月一次：工资结余进来后，在“配置”页更新现金余额（看板会按新总资产重算每只股票该买多少）",
+];
+function viewReview(){
+  const wk = weekKey(), rv = ST.reviews[wk] || (ST.reviews[wk] = {checks:[], note:""});
+  const P = portfolio();
+  const S = DATA.stocks;
+  const hit = S.filter(s=>s.plan && s.plan.hit);
+  const buy = S.filter(s=>s.yzone==="买入区");
+  const sell = S.filter(s=>holding(s) && (s.yzone==="减仓区" || s.status==="高位观察"));
+  const stars = S.filter(s=>s.star);
+  const noDiv = S.filter(s=>holding(s) && !(s.dps>0));
+  const warn = checks(P);
+  const mkWeek = m => { const xs = S.filter(s=>s.market===m && s.chg5!=null); return xs.length ? xs.reduce((a,s)=>a+s.chg5,0)/xs.length : null; };
+  const movers = S.filter(s=>s.chg5!=null).sort((a,b)=>a.chg5-b.chg5);
+  const li = (arr, fn) => arr.length ? `<ul class="plain">${arr.map(s=>`<li>${fn(s)}</li>`).join("")}</ul>` : `<div class="hint">无</div>`;
+  const nm = s => `<b>${esc(s.name)}</b> <span class="mk ${s.market}">${MKNAME[s.market]}</span>`;
+  const past = Object.entries(ST.reviews).filter(([w,r])=>w!==wk && r.note).sort((a,b)=>b[0].localeCompare(a[0])).slice(0,8);
+  const done = rv.checks.filter(Boolean).length;
+  return `<div class="stats">
+      <div class="card stat"><div class="l">本周（${wk}）</div><div class="v num">${done}/${CHECKS.length}</div><div class="s">复盘清单完成</div></div>
+      <div class="card stat"><div class="l">新加坡 近5日</div><div class="v num ${sign(mkWeek("SG"))}">${pctTxt(mkWeek("SG"))}</div><div class="s">观察池平均</div></div>
+      <div class="card stat"><div class="l">港股 近5日</div><div class="v num ${sign(mkWeek("HK"))}">${pctTxt(mkWeek("HK"))}</div><div class="s">观察池平均</div></div>
+      <div class="card stat"><div class="l">A股 近5日</div><div class="v num ${sign(mkWeek("A"))}">${pctTxt(mkWeek("A"))}</div><div class="s">观察池平均</div></div>
+    </div>
+    <div class="two">
+      <div class="card"><div class="card-h"><h2>本周要处理</h2></div><div class="card-b">
+        <div class="small"><b>计划已触发</b></div>${li(hit, s=>`${nm(s)} ${esc(s.plan.cond)}，现价 ${cur(s)}${f(s.price,pf(s))}`)}
+        <div class="small" style="margin-top:10px"><b>★ 低位机会</b>（买入区 + 周线低位）</div>${li(stars, s=>`${nm(s)} 税后 ${f(s.yield)}%，历史 ${s.ypct ?? "-"} 分位`)}
+        <div class="small" style="margin-top:10px"><b>持仓中偏高</b>（减仓区或周线高位）</div>${li(sell, s=>`${nm(s)} ${s.yzone}${s.zone.w==="上"?" · 周线高位":""}，税后 ${f(s.yield)}%`)}
+        ${noDiv.length?`<div class="small" style="margin-top:10px"><b>持仓近一年无分红</b></div>${li(noDiv, nm)}`:""}
+        <div class="small" style="margin-top:10px"><b>波段</b>（买入确认 / 卖出区 / 区间被打破）</div>${li(S.filter(s=>s.swing&&s.swing.active&&["买入确认","卖出区","跌破","突破"].includes(s.swing.state)&&(s.swing.state!=="卖出区"||swingOpen(s).shares)), s=>`${nm(s)} <span class="sw ${s.swing.state}">${s.swing.state}</span> 区间 ${f(s.swing.lo,pf(s))}–${f(s.swing.hi,pf(s))}${swingOpen(s).shares?` · 波段持有 ${swingOpen(s).shares}`:""}`)}
+        ${(()=>{const b = swingBook(); return b.trades.length?`<div class="small" style="margin-top:6px">今年波段已实现 <b class="${sign(b.ytdS)}">${b.ytdS>0?"+":""}S$${money(b.ytdS)}</b>（${b.ytdN} 笔卖出）</div>`:"";})()}
+        <div class="small" style="margin-top:10px"><b>分批建议</b>（只列要买或要卖的）</div>${li(S.map(s=>[s,advice(s)]).filter(([s,a])=>a&&(a.type==="buy"&&(holding(s)||a.plan)||a.type==="sell")).map(([s])=>s), s=>{const a = advice(s); return `${nm(s)} <span class="sw ${a.type==="buy"?"买入确认":"跌破"}">${esc(a.short)}</span> ${esc(a.text)}`;})}
+        ${(()=>{const l = (ST.cashLog||[]).slice(-1)[0]; const age = l ? daysSince(l.date) : null; return (!l || age > 35) ? `<div class="small" style="margin-top:10px"><b>现金余额</b></div><div class="warnbox bad">${l?`已经 ${age} 天没更新了`:"还没记录过"}，到“配置”页的“每月更新”填一下最新现金余额</div>` : "";})()}
+        <div class="small" style="margin-top:10px"><b>仓位提醒</b></div>${warn.length?`<ul class="plain">${warn.map(w=>`<li>${esc(w)}</li>`).join("")}</ul>`:`<div class="hint">${P.total?"无":"还没录入持仓"}</div>`}
+      </div></div>
+      <div class="card"><div class="card-h"><h2>观察池概况</h2></div><div class="card-b">
+        <div class="small"><b>处于买入区</b>：${buy.length} 只</div>${li(buy.slice().sort((a,b)=>(b.ypct??0)-(a.ypct??0)).slice(0,8), s=>`${nm(s)} ${s.ypct ?? "-"} 分位 · 税后 ${f(s.yield)}%`)}
+        <div class="small" style="margin-top:10px"><b>近5日跌幅最大</b></div>${li(movers.slice(0,4), s=>`${nm(s)} <span class="down">${pctTxt(s.chg5)}</span>`)}
+        <div class="small" style="margin-top:10px"><b>近5日涨幅最大</b></div>${li(movers.slice(-4).reverse(), s=>`${nm(s)} <span class="up">${pctTxt(s.chg5)}</span>`)}
+      </div></div>
+    </div>
+    <div class="card"><div class="card-h"><h2>复盘清单</h2><span class="hint">每周一次，约 20 分钟。勾选和笔记按周保存在本机。</span></div><div class="card-b">
+      ${CHECKS.map((c,i)=>`<label class="check"><input type="checkbox" data-chk="${i}" ${rv.checks[i]?"checked":""}><span>${c}</span></label>`).join("")}
+      <div class="small" style="margin:12px 0 6px"><b>本周笔记</b>（做了什么、为什么、下周关注什么）</div>
+      <textarea id="note" placeholder="例：OCBC 进入买入区，按计划加 1 手；格力等三季报再决定……">${esc(rv.note)}</textarea>
+    </div></div>
+    ${past.length?`<div class="card"><div class="card-h"><h2>往期笔记</h2></div><div class="card-b">${past.map(([w,r])=>`<div style="margin-bottom:12px"><div class="small"><b>${w}</b> · 清单 ${r.checks.filter(Boolean).length}/${CHECKS.length}</div><div class="small" style="white-space:pre-wrap">${esc(r.note)}</div></div>`).join("")}</div></div>`:""}`;
+}
+
+/* ---------- 渲染与交互 ---------- */
+function render(){
+  if (!DATA) return;
+  migratePlans();
+  ALLOC = computeAlloc();
+  const v = {board:viewBoard, low:viewLow, swing:viewSwing, plan:viewPlan, alloc:viewAlloc, review:viewReview}[TAB]();
+  const err = DATA.errors && DATA.errors.length ? `<div class="err">以下股票今天获取失败：${DATA.errors.map(x=>esc(String(x).split("：")[0])).join("；")}</div>` : "";
+  $("#app").innerHTML = err + v + `<div class="note">股息率为税后口径；买卖区按每只股票过去 10 年自己的股息率分布划分（高 20% 买入、低 20% 减仓）。仅为纪律提醒，不构成投资建议。</div>`;
+}
+function setTab(t){
+  TAB = t; document.querySelectorAll("button.tab").forEach(b=>b.classList.toggle("on", b.dataset.t===TAB));
+  try { localStorage.setItem("dividend-tab", TAB); } catch(_){}
+  render();
+}
+$("#tabs").addEventListener("click", e=>{ const t = e.target.closest("button.tab"); if (t) setTab(t.dataset.t); });
+$("#app").addEventListener("click", e=>{
+  const m = e.target.closest("[data-m]"); if (m){ MKT = m.dataset.m; render(); return; }
+  const lm = e.target.closest("[data-lm]"); if (lm){ ST.ladderMode = lm.dataset.lm; save(); render(); return; }
+  const ed = e.target.closest("[data-edit]"); if (ed){ openEdit(ed.dataset.edit); return; }
+  const sr = e.target.closest("[data-swrec]"); if (sr){ openSwing(sr.dataset.swrec); return; }
+  const sx = e.target.closest("[data-swxfer]"); if (sx){ if (sx.dataset.armed){ xferToBase(sx.dataset.swxfer); } else { sx.dataset.armed = "1"; sx.textContent = "再点确认转入"; } return; }
+  const sd = e.target.closest("[data-swdel]"); if (sd){ if (confirmDel(sd)) { ST.swings = ST.swings.filter(x=>x.id!==sd.dataset.swdel); save(); render(); } return; }
+  if (e.target.closest("#exp")) return exportAll();
+  if (e.target.closest("#imp")) return $("#importFile").click();
+  if (e.target.closest("input,textarea,label")) return;
+  const r = e.target.closest("tr.row[data-id]"); if (r){ const id = r.dataset.id; OPEN.has(id)?OPEN.delete(id):OPEN.add(id); render(); }
+});
+$("#app").addEventListener("change", e=>{
+  const t = e.target;
+  if (t.dataset.target != null){ ST.targets = {...targets(), [t.dataset.target]: Number(t.value)||0}; save(); render(); }
+  else if (t.id === "aCashIn"){ ST.aCash = Number(t.value)||0; save(); render(); }
+  else if (t.id === "cashIn"){ const v = Number(t.value)||0; ST.cash = v; const d = todayStr();
+    if (ST.cashLog.length && ST.cashLog[ST.cashLog.length-1].date === d) ST.cashLog[ST.cashLog.length-1].cash = v; else ST.cashLog.push({date:d, cash:v});
+    ST.cashLog = ST.cashLog.slice(-24); save(); render(); }
+  else if (t.dataset.chk != null){ const wk = weekKey(); ST.reviews[wk].checks[+t.dataset.chk] = t.checked; save(); render(); }
+});
+$("#app").addEventListener("input", e=>{
+  if (e.target.id === "note"){ ST.reviews[weekKey()].note = e.target.value; save(); }
+});
+function openEdit(id){
+  const s = DATA.stocks.find(x=>k(x)===id); editing = s;
+  const h = ST.holdings[id] || {};
+  $("#dlgTitle").textContent = `${s.name} ${s.code}`;
+  $("#fCostLab").textContent = `成本价（${s.qccy}）`;
+  $("#fShares").value = h.shares ?? ""; $("#fCost").value = h.cost ?? ""; $("#fPlan").value = ST.planPct[id] ?? "";
+  $("#fRating").value = ST.rating[id] || ""; $("#fRating").options[0].text = s.rating ? `用默认（${s.rating}）` : "用默认（未评级）";
+  const PP = portfolio(), tot = isA(s) ? PP.a.total : PP.total;
+  $("#fPlanHint").textContent = tot ? `按${isA(s)?"A股账户":"新币账户"}现在的总额 S$${money(tot)}：1% ≈ S$${money(tot/100)}。同一部分的候选股，计划合计可到目标的 3 倍（先到先得）` : `先在“配置”页填${isA(s)?"A股账户":""}现金余额，才能把占比换算成金额`;
+  $("#dlg").returnValue = ""; $("#dlg").showModal();
+}
+$("#dlg").addEventListener("close", ()=>{
+  const act = $("#dlg").returnValue, id = editing && k(editing);
+  if (!id) return;
+  if (act === "save"){
+    const sh = parseFloat($("#fShares").value), c = parseFloat($("#fCost").value), pl = parseFloat($("#fPlan").value);
+    if (sh > 0){ ST.holdings[id] = {shares: sh, cost: c > 0 ? c : null}; ST.peak[id] = Math.max(Number(ST.peak[id])||0, sh); }
+    else { delete ST.holdings[id]; delete ST.peak[id]; }
+    if (pl > 0) ST.planPct[id] = Math.min(pl, 15); else delete ST.planPct[id];
+    const rt = $("#fRating").value; if (rt) ST.rating[id] = rt; else delete ST.rating[id];
+  } else if (act === "clear"){ delete ST.holdings[id]; delete ST.peak[id]; }
+  save(); render();
+});
+function exportAll(){
+  const blob = new Blob([JSON.stringify(ST, null, 1)], {type:"application/json"});
+  const a = document.createElement("a"); a.href = URL.createObjectURL(blob);
+  a.download = `红利看板数据-${new Date().toISOString().slice(0,10)}.json`; a.click();
+  setTimeout(()=>URL.revokeObjectURL(a.href), 1000);
+}
+$("#importFile").addEventListener("change", async e=>{
+  const file = e.target.files[0]; if (!file) return;
+  try {
+    const v = JSON.parse(await file.text());
+    if (v && typeof v === "object"){
+      ST = v.holdings ? v : {holdings: v};           // 兼容旧版只有持仓的导出
+      ST.cash ??= 0; ST.reviews ??= {}; ST.swings ??= []; ST.plans ??= {}; ST.planPct ??= {}; ST.peak ??= {}; ST.cashLog ??= []; save(); render();
+    }
+  } catch(_) { $("#meta").textContent = "导入失败：文件格式不对"; }
+  e.target.value = "";
+});
+
+try { TAB = localStorage.getItem("dividend-tab") || "board"; } catch(_){}
+if (!["board","low","swing","plan","alloc","review"].includes(TAB)) TAB = "board";
+document.querySelectorAll("button.tab").forEach(b=>b.classList.toggle("on", b.dataset.t===TAB));
+fetch("data.json?t=" + Date.now()).then(r=>r.json()).then(d=>{
+  DATA = d;
+  $("#meta").textContent = `数据日期 ${d.date} · 更新于 ${d.updated}（新加坡时间）`;
+  render();
+}).catch(()=>{ $("#meta").textContent = "数据加载失败"; $("#app").innerHTML = `<div class="card"><div class="empty">还没有数据。请先在 GitHub Actions 里运行一次“红利看板”。</div></div>`; });
+</script>
+</body>
+</html>

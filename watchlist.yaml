@@ -96,7 +96,7 @@ stocks:
   - {code: "ME8U", market: SG, name: 丰树工业信托 MINT,     sector: 房地产信托}
   - {code: "M44U", market: SG, name: 丰树物流信托 MLT,      sector: 房地产信托}
   - {code: "BUOU", market: SG, name: 辉盛物流工业信托 FLCT,  sector: 房地产信托}
-  - {code: "AJBU", market: SG, name: 吉宝数据中心 Keppel DC, sector: 房地产信托}
+  - {code: "AJBU", market: SG, name: 吉宝数据中心 Keppel DC, sector: 房地产信托, dps: 0.1096}   # 手动：2H25 5.248 分 + 1H26 5.714 分（有预付分红，自动算会偏高）；下次业绩后更新
   - {code: "C2PU", market: SG, name: 百汇生命 PLife REIT,   sector: 房地产信托}
   - {code: "HMN",  market: SG, name: 凯德雅诗阁信托 CLAS,   sector: 房地产信托}
 
