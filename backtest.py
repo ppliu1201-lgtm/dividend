@@ -77,7 +77,7 @@ def prepare(h, tax, floor_net):
                 m = sum(w) / 20
                 sd = (sum((x - m) ** 2 for x in w) / 20) ** 0.5
                 pct = sum(1 for x in sv if x <= y) / len(sv)
-                row.update(lv=(b1, b2, b3), sl=(s1, s2), wlow=m - 2 * sd, wmid=m, pct=pct)
+                row.update(lv=(b1, b2, b3), sl=(s1, s2), wlow=m - 2 * sd, wmid=m, pct=pct, med=q(sv, 0.5))
         ys.append(y)
         rows.append(row)
     return rows
@@ -252,10 +252,19 @@ def strat_targets(strat, r, frac, peak):
             elif ns:
                 cap = peak * (1 / 3 if ns >= 2 else 2 / 3)
         return buy, cap
-    nb = sum(1 for lv in FG_BUY if y >= lv)
+    # 网格及其变体：strat 形如 "fg2|ext|warn|pace"
+    base, *opts = strat.split("|")
+    ext = "ext" in opts
+    levels = FG_BUY + ((6.5, 7.0) if ext else ())
+    sells = FG_SELL[base] + (((5.0, 5.5) if base == "fg2" else (6.0, 6.5)) if ext else ())
+    nb = sum(1 for lv in levels if y >= lv)
     buy = nb / 3 if nb and r.get("wmid") and r["adj"] <= r["wmid"] else None
-    allowed = sum(1 for th in FG_SELL[strat] if y > th)          # 0..3 份
-    cap = allowed / 3 if allowed < 3 else None
+    if buy is not None and "warn" in opts and (y > 8.0 or (r.get("med") and y > 2 * r["med"])):
+        buy = None                                           # 股息率异常高：先查分红，不自动买
+    if buy is not None and "pace" in opts:
+        buy = min(buy, (int(frac * 3 + 1e-6) + 1) / 3)       # 每周最多加一格
+    allowed = sum(1 for th in sells if y > th)
+    cap = allowed / 3 if allowed < len(levels) else None
     return buy, cap
 
 
@@ -529,7 +538,7 @@ def main():
         + f"<td>{r['hold']:.1f}%</td><td>{r['ma']['tpy']:.1f}</td></tr>"
         for s_, r in sorted(swing_res, key=lambda x: -(x[1]['ma']['cagr'] - x[1]['hold'])))
 
-    port_rows, crowd_rows = "", ""
+    port_rows, crowd_rows, hi_rows = "", "", ""
     for acct, buckets in (("新币账户（新加坡+港股，现金 15%）", {b: t for b, t in targets.items() if b != "A股"}),
                           ("A股账户（全部可投）", {"A股": 1.0})):
         ss = [(b, rows) for b, rows, _, _, _ in prepared if b in buckets]
@@ -560,6 +569,16 @@ def main():
             strat_rows += (f"<tr><td>{acct}</td><td style='white-space:normal;max-width:380px'><b>混合</b>：新加坡和香港本地用我们的规则，A 股 / H 股用{fgname}</td>"
                            f"<td>{st4['cagr']:.2f}%</td><td>-</td><td>{st4['mdd']:.1f}%</td><td>{st4['inv']:.0f}%</td><td>-</td></tr>")
             print("混合", acct[:4], fgk, {kk: round(v, 2) for kk, v in st4.items()})
+        # 混合 2 的变体：6% 以上怎么办
+        for opt, oname in (("", "6% 买满封顶（对照）"), ("|warn", "+ 股息率异常（>8% 或 >2 倍中位数）不买"),
+                           ("|pace", "+ 每周最多加一格"), ("|warn|pace", "+ 异常不买 + 每周最多一格"),
+                           ("|ext", "6.5% / 7% 继续各加一格（最多计划的 5/3）"), ("|ext|warn|pace", "继续加到 7% + 异常不买 + 每周一格")):
+            mix = ["ours" if kd in ("SG", "HKL") else "fg2" + opt for kd in kinds]
+            navs, inv = portfolio_s(ss, buckets, 3, weeks, mix)
+            st5 = stats(navs, inv)
+            hi_rows += (f"<tr><td>{acct}</td><td style='white-space:normal;max-width:380px'>{oname}</td><td>{st5['cagr']:.2f}%</td>"
+                        f"<td>{st5['mdd']:.1f}%</td><td>{st5['inv']:.0f}%</td></tr>")
+            print("高股息", acct[:4], opt or "base", {kk: round(v, 2) for kk, v in st5.items()})
         # 波段仓会不会挤掉底仓（每档 1/3 · 超额 3 倍）
         base_navs, base_inv = portfolio(ss, buckets, "equal", 3, weeks)
         base_st = stats(base_navs, base_inv)
@@ -616,6 +635,9 @@ A 比 C 好的 {winAC} 只，C 比 A 好的 {winCA} 只；B 比 C 好的 {winBC}
 <div class="tw"><table><tr><th>范围</th><th>规则</th><th>平均年化</th><th>中位数</th><th>最大回撤</th><th>平均股票占比</th><th>比我们的规则好的股票</th></tr>{strat_rows}</table></div>
 <div class="hint" style="margin-top:6px">网格按博主公开的做法：股息率用税前、全年分红，5% 起买、每 0.5 个点一格，只在周线中轨下买；“卖得更晚”是另一种记忆中的版本。
 账户级同样按“部分封顶 + 候选超额 3 倍”，网格版先买股息率最高的。</div></div>
+<div class="card"><h2>网格买到 6% 以后怎么办（混合 2：新加坡/香港本地用我们的规则，A/H 股用网格卖得更晚）</h2>
+<div class="tw"><table><tr><th>账户</th><th>A/H 股网格的做法</th><th>年化</th><th>最大回撤</th><th>平均股票占比</th></tr>{hi_rows}</table></div>
+<div class="hint" style="margin-top:6px">继续加格时，多出来的两格先卖：股息率回到 5.5%、5% 时各卖一格，之后照常 4.5% / 4% / 3.5%。“中位数”用该股近 5 年股息率。</div></div>
 <div class="card"><h2>波段仓会不会挤掉底仓的钱？（账户级，每档 1/3 · 超额 3 倍）</h2>
 <div class="tw"><table><tr><th>账户</th><th>波段做法</th><th>账户年化</th><th>平均底仓占比</th><th>平均波段占比</th><th>底仓被挤的周数</th><th>底仓占比比不做波段少</th><th>现金用光的周数</th></tr>{crowd_rows}</table></div>
 <div class="hint" style="margin-top:6px">波段仓在计划之外、用账户现金买，市值和看板一样计入所在部分；“被挤”= 如果没有波段仓，那一周本来能多买的底仓。
