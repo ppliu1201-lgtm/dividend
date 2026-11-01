@@ -63,7 +63,7 @@ def prepare(h, tax, floor_net):
         d, raw, adj = h["dates"][t], h["raw"][t], h["adj"][t]
         y = build.ttm_div(dd, dv, d) / raw * 100 if raw > 0 else 0
         wk_adj.append(adj)
-        row = {"d": d, "adj": adj, "y": y, "lv": None}
+        row = {"d": d, "wk": date.fromisoformat(d).isocalendar()[:2], "adj": adj, "y": y, "lv": None}
         if len(ys) >= MINWIN and len(wk_adj) >= 20:
             sv = sorted(ys[-WIN:])
             if sv[-1] > 0:
@@ -76,7 +76,8 @@ def prepare(h, tax, floor_net):
                 w = wk_adj[-20:]
                 m = sum(w) / 20
                 sd = (sum((x - m) ** 2 for x in w) / 20) ** 0.5
-                row.update(lv=(b1, b2, b3), sl=(s1, s2), wlow=m - 2 * sd, wmid=m)
+                pct = sum(1 for x in sv if x <= y) / len(sv)
+                row.update(lv=(b1, b2, b3), sl=(s1, s2), wlow=m - 2 * sd, wmid=m, pct=pct)
         ys.append(y)
         rows.append(row)
     return rows
@@ -120,6 +121,72 @@ def simulate(rows, variant):
     return navs, invested
 
 
+WEIGHTS = {"equal": [0, 1 / 3, 2 / 3, 1.0], "front": [0, 0.5, 0.75, 1.0]}
+COMBOS = [("equal", 2), ("equal", 3), ("front", 2), ("front", 3)]
+COMBO_NAME = {"equal": "每档 1/3", "front": "50/25/25"}
+
+
+def portfolio(stocks, targets, weights, over, weeks):
+    """账户级模拟：各部分按目标比例封顶，同一部分里股息率分位高的先买，候选计划合计 = 目标 × over。
+    stocks: [(bucket, {wk: row})]。返回每周净值和股票占比。"""
+    cum = WEIGHTS[weights]
+    nb_bucket = {}
+    for b, _ in stocks:
+        nb_bucket[b] = nb_bucket.get(b, 0) + 1
+    cash = 1.0
+    st = [{"sh": 0.0, "units": 0.0, "peak": 0.0, "p": None} for _ in stocks]
+    navs, inv = [], []
+    for wk in weeks:
+        cash *= 1 + CASH_W
+        for i, (b, rows) in enumerate(stocks):
+            r = rows.get(wk)
+            if r:
+                st[i]["p"] = r["adj"]
+        mv = [x["sh"] * x["p"] if x["p"] else 0.0 for x in st]
+        nav = cash + sum(mv)
+        # 先卖
+        for i, (b, rows) in enumerate(stocks):
+            r = rows.get(wk); x = st[i]
+            if not r or not r["lv"] or x["units"] <= 0:
+                continue
+            ns = sum(1 for sl in r["sl"] if r["y"] <= sl)
+            if ns:
+                keep = x["peak"] * (1 / 3 if ns >= 2 else 2 / 3)
+                if x["units"] > keep + 1e-12:
+                    frac = (x["units"] - keep) / x["units"]
+                    sell = x["sh"] * frac
+                    cash += sell * x["p"] * (1 - COST)
+                    x["sh"] -= sell; x["units"] = keep
+        mv = [x["sh"] * x["p"] if x["p"] else 0.0 for x in st]
+        nav = cash + sum(mv)
+        # 再买：每个部分按分位从高到低
+        for bucket, tgt in targets.items():
+            room = tgt * nav - sum(m for (b, _), m in zip(stocks, mv) if b == bucket)
+            plan = tgt * over / max(1, nb_bucket.get(bucket, 1)) * nav
+            cands = []
+            for i, (b, rows) in enumerate(stocks):
+                r = rows.get(wk)
+                if b != bucket or not r or not r["lv"]:
+                    continue
+                nb = sum(1 for lv in r["lv"] if r["y"] >= lv)
+                if not nb or r["adj"] > r["wmid"] or r["adj"] < r["wlow"]:
+                    continue
+                cands.append((r["pct"], i, nb))
+            for _, i, nb in sorted(cands, reverse=True):
+                x = st[i]
+                want = cum[nb] * plan - x["units"]
+                amt = min(want, room, cash / (1 + COST))
+                if amt <= 1e-9:
+                    continue
+                x["sh"] += amt / x["p"]; x["units"] += amt; x["peak"] = max(x["peak"], x["units"])
+                cash -= amt * (1 + COST); room -= amt
+        mv = [x["sh"] * x["p"] if x["p"] else 0.0 for x in st]
+        nav = cash + sum(mv)
+        navs.append(nav)
+        inv.append(sum(mv) / nav if nav else 0)
+    return navs, inv
+
+
 def stats(navs, invested):
     n = len(navs)
     yrs = n / 52
@@ -136,7 +203,7 @@ def main():
     cfg = yaml.safe_load((HERE / "watchlist.yaml").read_text(encoding="utf-8"))
     d = cfg["defaults"]
     floor_net = float(d.get("floor_net", 4.5))
-    results, failed = [], []
+    results, failed, prepared = [], [], []
     for s in cfg["stocks"]:
         mk = s.get("market", "A")
         tax = float(s["tax"]) if s.get("tax") is not None else float(d.get({"A": "tax_a", "HK": "tax_hk", "SG": "tax_sg"}[mk], 0))
@@ -148,6 +215,9 @@ def main():
             print("失败", s["code"], e)
             continue
         rows = [r for r in rows if r["lv"]][-YEARS * 52:]
+        bucket = s.get("bucket") or build.BUCKET[mk]
+        if rows:
+            prepared.append((bucket, {r["wk"]: r for r in rows}, mk))
         if len(rows) < 104:
             failed.append(f"{s['name']}：历史不足")
             continue
@@ -172,6 +242,22 @@ def main():
         return xs[len(xs) // 2] if xs else 0
 
     touched = [r for r in results if r["events"] > 0]
+
+    # ---- 账户级：分批比例 × 候选超额 ----
+    targets = {b: float(v) / 100 for b, v in (cfg.get("targets") or {}).items() if b not in ("现金",) and float(v) > 0}
+    port_rows = ""
+    for acct, buckets in (("新币账户（新加坡+港股，现金 15%）", {b: t for b, t in targets.items() if b != "A股"}),
+                          ("A股账户（全部可投）", {"A股": 1.0})):
+        ss = [(b, rows) for b, rows, _ in prepared if b in buckets]
+        if not ss:
+            continue
+        weeks = sorted({wk for _, rows in ss for wk in rows})[-YEARS * 52:]
+        for w, ov in COMBOS:
+            navs, inv = portfolio(ss, buckets, w, ov, weeks)
+            st_ = stats(navs, inv)
+            port_rows += (f"<tr><td>{acct}</td><td>{COMBO_NAME[w]} · 超额 {ov} 倍</td><td>{st_['cagr']:.2f}%</td>"
+                          f"<td>{st_['tot']:.0f}%</td><td>{st_['mdd']:.1f}%</td><td>{st_['inv']:.0f}%</td></tr>")
+            print("组合", acct[:4], w, ov, {k: round(v, 2) for k, v in st_.items()})
     winAC = sum(1 for r in touched if r["A"]["cagr"] > r["C"]["cagr"] + 0.05)
     winCA = sum(1 for r in touched if r["C"]["cagr"] > r["A"]["cagr"] + 0.05)
     winBC = sum(1 for r in touched if r["B"]["cagr"] > r["C"]["cagr"] + 0.05)
@@ -207,6 +293,9 @@ th{{color:var(--sub);font-weight:500;font-size:12px}} .c,.hint{{color:var(--sub)
 {summary_rows(results, '全部股票')}{summary_rows(touched, '出现过下轨下方买点的')}</table></div>
 <div class="hint" style="margin-top:6px">出现过“股息率到第 1 档、但价格在周线下轨下方”的股票有 {len(touched)} 只：
 A 比 C 好的 {winAC} 只，C 比 A 好的 {winCA} 只；B 比 C 好的 {winBC} 只（差距 0.05 个百分点以内算打平）。</div></div>
+<div class="card"><h2>账户级回测：每档比例 × 候选超额（跌破下轨都按“等止跌”）</h2>
+<div class="tw"><table><tr><th>账户</th><th>规则</th><th>年化</th><th>累计</th><th>最大回撤</th><th>平均股票占比</th></tr>{port_rows}</table></div>
+<div class="hint" style="margin-top:6px">从全部现金开始，每周检查。同一部分里每只股票的计划 = 部分目标 × 超额倍数 ÷ 池子里的股票数；股息率分位高的先买，部分总额不超过目标。港股按港币价格计算，没算汇率变化。</div></div>
 <div class="card"><h2>每只股票（按“照买 − 等止跌”从大到小）</h2><div class="tw"><table>
 <tr><th>股票</th><th>下轨下方买点（周）</th><th>A 等止跌</th><th>B 先买一半</th><th>C 照买</th><th>一直持有</th></tr>{body}</table></div></div>
 <div class="card hint">说明：没有模拟公司评级、250 日线和波段仓；股票池是按今天挑的，有幸存者偏差（当年分红出问题被剔除的股票不在里面），
