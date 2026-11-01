@@ -71,6 +71,7 @@ main{max-width:1280px;margin:0 auto;padding:16px}
 .st.持有观望{background:var(--warn-soft);color:var(--warn)}
 .st.高位观察{background:var(--bad-soft);color:var(--bad)}
 .st.低位机会{background:var(--good-soft);color:var(--good)}
+.st.急跌中{background:var(--bad-soft,#fde8e8);color:var(--bad,#c53030)}
 .pend{font-size:11px;color:var(--warn)}
 
 .bb{width:108px;display:inline-block;text-align:left}
@@ -270,7 +271,7 @@ const filtered = () => DATA.stocks.filter(s => MKT === "all" || s.market === MKT
 
 /* ---------- 小组件 ---------- */
 function nameCell(s){
-  return `<div><div class="nm"><b>${esc(s.name)}</b><span class="mk ${s.market}">${MKNAME[s.market]}</span>${s.market==="HK"&&!s.tax?'<span class="yrs" title="香港本地公司，派息不扣税">0税</span>':""}${s.tag?`<span class="mk HK" title="利润随商品价格大起大落，分红也会变，仓位要小">${esc(s.tag)}</span>`:""}${ratingOf(s)?`<span class="rt ${weakR(s)?"weak":""}" title="公司评级：${RATING_TXT[ratingOf(s)]||""}${ratingMul(s)!==1?"，计划仓位按 "+ratingMul(s)+" 倍":""}">${esc(ratingOf(s))}</span>`:""}</div>
+  return `<div><div class="nm"><b>${esc(s.name)}</b><span class="mk ${s.market}">${MKNAME[s.market]}</span>${s.market==="HK"&&!s.tax?'<span class="yrs" title="香港本地公司，派息不扣税">0税</span>':""}${s.tag?`<span class="mk HK" title="利润随商品价格大起大落，分红也会变，仓位要小">${esc(s.tag)}</span>`:""}${ratingOf(s)?`<span class="rt ${weakR(s)?"weak":""}" title="公司评级：${RATING_TXT[ratingOf(s)]||""}${ST.rating[k(s)]?"（页面手动改）":s.rating_src?"（"+s.rating_src+(s.profit?"：利润"+s.profit.basis+" "+(s.profit.g>0?"+":"")+s.profit.g+"%":"")+"）":""}${ratingMul(s)!==1?"，计划仓位按 "+ratingMul(s)+" 倍":""}">${esc(ratingOf(s))}</span>`:""}${s.anomaly?'<span class="rt weak" title="股息率异常高：先看最近财报和分红公告，确认分红不会减再买">股息异常</span>':""}${s.dps_fwd?'<span class="rt weak" title="利润大跌，分红可能下调：按利润估算下一年分红约 '+s.dps_fwd+'">利润大跌</span>':""}</div>
     <div class="code num">${esc(s.code)} · ${esc(s.sector)}</div></div>`;
 }
 function priceCell(s){
@@ -278,7 +279,7 @@ function priceCell(s){
 }
 function yieldCell(s){
   if (!(s.dps > 0)) return `<span class="pend">近一年无分红</span>`;
-  const p = s.ypct != null ? `${s.win_years && s.win_years < 10 ? "近"+s.win_years+"年 " : ""}${s.ypct} 分位` : "历史不足";
+  const p = s.mode === "网格" ? `网格 · 税前 ${f(s.yield_gross)}%` : s.ypct != null ? `${s.win_years && s.win_years < 10 ? "近"+s.win_years+"年 " : ""}${s.ypct} 分位` : "历史不足";
   return `<div class="yld ${s.yzone} num">${f(s.yield)}%</div>
     <span class="yz ${s.yzone}">${s.yzone} · ${p}</span>`;
 }
@@ -535,6 +536,8 @@ function swingDetail(s, cols){
 /* ---------- 滚动（波段仓主规则，借鉴吴富贵四条） ---------- */
 const ROLL_LAB = ["日线到下轨", "周线中轨~下轨", "税后股息率≥5%", "在250日线上"];
 /* 每笔 = 计划仓位 × 15%（波段仓 30% 分两笔） */
+/* 每笔 = 计划仓位（底仓买满时）的 15%，波段仓最多 = 计划的 30%，分两笔。没有底仓也可以做。
+   波段用计划之外的钱，不占单只 15% 上限 */
 function rollLot(s){
   const plan = planS(s); if (!plan) return null;
   const n = roundLot(plan * 0.15 / s.fx / s.price, s.lot);
@@ -558,16 +561,55 @@ function rollState(s){
     if (R.sell) return {cls:"卖出区", t:"到上轨 · 分批卖", why:"到周线上轨：先卖一半，再涨再卖剩下的"};
     if (R.stop) return {cls:"中部", t:"日线破250 · 盯周收盘", why:"今天收在 250 日线下，但止损看周线收盘（周五），不急着卖；不再加仓"};
     if (o.nb < 2 && R.add2){ const L = rollLot(s);
-      return {cls:"买入确认", t:"可补第二笔", why:`再次碰到日线下轨、仍在 250 日线上：补第二笔${L&&L.n?`约 ${L.n.toLocaleString()} 股（S$${money(L.amt)}）`:L?"（15% 不足一手：第一笔已买一手的，第二笔也买一手或跳过）":""}`}; }
+      return {cls:"买入确认", t:"可补第二笔", why:`再次碰到日线下轨、仍在 250 日线上：补第二笔${L&&L.n?`约 ${L.n.toLocaleString()} 股（${amt(s,L.amt)}）`:L?"（计划的 15% 不足一手：第一笔已买一手的，第二笔也买一手或跳过）":""}`}; }
     return {cls:"中部", t: o.nb >= 2 ? "两笔已满 · 等上轨" : "持有 · 等上轨", why:""};
   }
   if (R.buy){ const L = rollLot(s);
-    return {cls:"买入确认", t:"买第一笔", why: L ? (L.n ? `买第一笔约 ${L.n.toLocaleString()} 股（S$${money(L.amt)}，计划仓位的 15%）` : "计划仓位的 15% 不足一手：可以把两笔合成一手买，或跳过这只") : "填计划占比后算股数"}; }
+    return {cls:"买入确认", t:"买第一笔", why: L ? (L.n ? `买第一笔约 ${L.n.toLocaleString()} 股（${amt(s,L.amt)}，计划仓位的 15%）` : "计划仓位的 15% 不足一手：可以把两笔合成一手买，或跳过这只") : "填计划占比后算股数"}; }
   if (R.stop) return {cls:"跌破", t:"250日线下 · 不做", why:""};
   return {cls:"中部", t:`差 ${4-R.r.filter(Boolean).length} 条`, why:""};
 }
+/* 波段网格（A/H 股，吴富贵原帖）：波段仓 = 计划的 30%，税前 5% / 5.5% / 6% 各买 1/3，每份涨回 0.5 个点卖 */
+const GB = () => ((DATA.defaults||{}).grid_buy || [5, 5.5, 6]).map(Number);
+function gridSwingState(s){
+  const plan = planS(s), sp = plan * 0.3, yg = s.yield_gross, o = swingOpen(s);
+  const units = o.shares ? o.cost * s.fx : 0;               // 已投入（按成本，新币）
+  const lv = GB(), nb = lv.filter(L => yg >= L - 1e-9).length;
+  const allowed = lv.filter(L => yg > L - 0.5 + 1e-9).length;    // 5.5 / 5 / 4.5 之上才可以继续拿
+  const lotV = sp / 3, wm = s.boll && s.boll.w ? s.boll.w[1] : null;
+  let act = null;
+  if (o.shares && units > allowed / 3 * sp + lotV * 0.5){
+    const sell = roundLot(o.shares * (units - allowed / 3 * sp) / units, s.lot) || o.shares;
+    act = {t:"卖", cls:"卖出区", n: Math.min(sell, o.shares), why:`股息率回到 ${f(lv[allowed] - 0.5,1)}% 以下：卖出 ${lv[allowed]}% 买的那份`};
+  } else if (plan && nb && (!wm || s.price <= wm) && units < nb / 3 * sp - lotV * 0.5){
+    const n = roundLot((nb / 3 * sp - units) / s.fx / s.price, s.lot);
+    act = n > 0 ? {t:"买", cls:"买入确认", n, why:`税前股息率 ${f(yg)}% ≥ ${lv[nb-1]}%：波段建到 ${nb}/3`} : {t:"不足一手", cls:"中部", n:0, why:"这一格金额不足一手"};
+  } else if (plan && nb && wm && s.price > wm && units < nb / 3 * sp - lotV * 0.5){
+    act = {t:"等回中轨下", cls:"中部", n:0, why:`价格在周线中轨（约 ${f(wm,pf(s))}）上方，等回落`};
+  }
+  return {plan, sp, units, nb, allowed, act, o};
+}
+function gridSwingCard(all){
+  const xs = all.filter(s=>s.mode === "网格" && s.dps > 0);
+  const rows = xs.map(s=>({s, g: gridSwingState(s)})).filter(({s,g})=>g.o.shares || s.yield_gross >= GB()[0] - 0.3)
+    .sort((a,b)=>(b.g.o.shares?1:0)-(a.g.o.shares?1:0) || b.s.yield_gross - a.s.yield_gross).map(({s,g})=>{
+    const id = k(s), lv = GB();
+    const buyP = lv.map(L=>`${f(s.dps/(L/100),pf(s))}`).join(" / "), sellP = lv.map(L=>`${f(s.dps/((L-0.5)/100),pf(s))}`).join(" / ");
+    const a = g.act;
+    return `<tr class="row" style="cursor:default"><td>${nameCell(s)}</td>
+      <td data-l="现价/涨跌" class="num">${priceCell(s)}</td>
+      <td data-l="税前股息率" class="num"><b>${f(s.yield_gross)}%</b><div class="mini">已到 ${g.nb}/3 格</div></td>
+      <td data-l="状态" style="text-align:left;white-space:normal;min-width:170px;max-width:280px">${a?`<span class="sw ${a.cls}">${a.t}${a.n?" "+a.n.toLocaleString()+" 股":""}</span><div class="mini">${esc(a.why)}</div>`:`<span class="sw 中部">${g.o.shares?"持有 · 等卖点":g.nb&&!g.plan?`已到 ${g.nb}/3 格`:"未到买点"}</span>`}${!g.plan?'<div class="mini">填计划占比后算股数</div>':""}</td>
+      <td data-l="买 / 卖（5/5.5/6%）" class="num small"><div class="down">买 ${buyP}</div><div class="up">卖 ${sellP}</div></td>
+      <td data-l="波段持有" class="num">${g.o.shares?`<div>${g.o.shares.toLocaleString()}</div><div class="small ${sign(s.price-g.o.avg)}">${pctTxt((s.price/g.o.avg-1)*100)}</div>`:`<span class="muted">-</span>`}</td>
+      <td data-l="操作"><button class="link" data-swrec="${id}">记一笔</button></td></tr>`;
+  }).join("");
+  return `<div class="card"><div class="card-h"><h2>波段网格（A 股 / H 股）</h2><span class="hint">吴富贵原帖网格：波段仓 = 计划仓位的 30%（计划之外的钱，没底仓也能做）。税前股息率 5% / 5.5% / 6% 各买 1/3，每份涨回 0.5 个点卖（6%→5.5%、5.5%→5%、5%→4.5%），跌回来再买。只在周线中轨下买。</span></div>
+    ${rows?`<div class="tw"><table class="tbl"><thead><tr><th>股票</th><th>现价/涨跌</th><th>税前股息率</th><th>状态</th><th>买/卖价</th><th>波段持有</th><th>操作</th></tr></thead><tbody>${rows}</tbody></table></div>`
+      :`<div class="empty">现在没有接近网格买点（税前 ≥ 4.7%）的 A/H 股。</div>`}</div>`;
+}
 function rollCard(all){
-  const xs = all.filter(s=>s.roll);
+  const xs = all.filter(s=>s.roll && s.mode !== "网格");
   const held = s => swingOpen(s).shares > 0;
   const score = s => held(s) ? 200 : s.roll.buy ? 100 : s.roll.r.filter(Boolean).length;
   const show = xs.filter(s=>held(s) || s.roll.buy || s.roll.r.filter(Boolean).length >= 3)
@@ -593,7 +635,7 @@ function rollCard(all){
   const mail = `<div class="small" style="padding:8px 16px 0">${same
     ? `邮件名单已是最新${want.length?`（${want.map(esc).join("、")}）`:"（目前没有波段仓）"}：第二笔、卖出、止损邮件只发给这些`
     : `<b>邮件名单要更新</b>：把 watchlist.yaml 里那一行改成 <code>roll_holding: [${want.map(c=>`"${esc(c)}"`).join(", ")}]</code>（现在是 [${have.map(esc).join(", ")}]）。第二笔、卖出、止损邮件只发给名单里的股票`}</div>`;
-  return `<div class="card"><div class="card-h"><h2>滚动（波段仓主规则）</h2><span class="hint">波段仓 = 计划仓位的 30%，分两笔各 15%。① 四条全满足 → 买第一笔 ② 再碰日线下轨、仍在 250 日线上 → 补第二笔 ③ 到周线上轨 → 分批卖 ④ 周线收盘跌破 250 日线 → 卖出波段仓（A 级且底仓没买够的，转入底仓）</span></div>
+  return `<div class="card"><div class="card-h"><h2>滚动（新加坡 / 香港本地的波段）</h2><span class="hint">波段仓 = 计划仓位的 30%，分两笔各 15%，用计划之外的钱，没有底仓也可以做（不占 15% 单只上限）。① 四条全满足 → 买第一笔 ② 再碰日线下轨、仍在 250 日线上 → 补第二笔 ③ 到周线上轨 → 分批卖 ④ 周线收盘跌破 250 日线 → 卖出波段仓（A 级且底仓没买够的，转入底仓）</span></div>
     <div class="small muted" style="padding:0 16px 8px">今天 ${nb} 只四条全满足 · ${ns} 只在 250 日线下（不开新仓）· 共检查 ${xs.length} 只 · 下面列出有波段仓的和满足 ≥3 条的</div>
     ${rows?`<div class="tw"><table class="tbl"><thead><tr><th>股票</th><th>现价/涨跌</th><th>四条规则</th><th>状态</th><th>买/卖/止损</th><th>波段持有</th><th>操作</th></tr></thead><tbody>${rows}</tbody></table></div>`
       :`<div class="empty">今天没有接近滚动买点的股票。</div>`}
@@ -657,6 +699,7 @@ function viewSwing(){
       <div class="card stat"><div class="l">今年已实现</div><div class="v num ${sign(book.ytdS)}">${book.ytdS>0?"+":""}S$${money(book.ytdS)}</div><div class="s">${book.ytdN} 笔卖出（未扣费用）</div></div>
       <div class="card stat"><div class="l">累计已实现</div><div class="v num ${sign(book.allS)}">${book.allS>0?"+":""}S$${money(book.allS)}</div><div class="s">半年后对比“一直持有”，不如就停</div></div>
     </div>
+    ${gridSwingCard(all)}
     ${rollCard(all)}
     <div class="card"><div class="card-h"><h2>横盘区间（补充）</h2><span class="hint">自动识别：横盘 ≥3 个月、上下沿各碰 ≥2 次、周线布林带宽 ≤20%、均线走平 · 点行看走势图和回测</span>${mktSeg()}</div>
       ${act.length?`<div class="tw"><table class="tbl"><thead><tr><th>股票</th><th>现价/涨跌</th><th>区间</th><th>位置</th><th>状态</th><th>买/卖/止损</th><th>回测</th><th>波段持有</th><th>操作</th></tr></thead><tbody>${rows}</tbody></table></div>`
@@ -692,8 +735,8 @@ $("#sdlg").addEventListener("close", ()=>{
 
 /* ---------- 分批建仓 / 减仓建议 ---------- */
 const LADDER_W = {pyramid:[0.2,0.3,0.5], equal:[1/3,1/3,1/3], front:[0.5,0.25,0.25]};
-/* 第一笔 50%，第 2、3 档各 25%：经验上大部分股票只会到第 1 档，先多买；候选超额 3 倍让资金能投满 */
-const ladderMode = () => "front";
+/* 每档 1/3 + 候选超额 3 倍：真实数据回测（2020-2026）与 50/25/25 差别很小，3 倍明显好于 2 倍 */
+const ladderMode = () => "equal";
 const OVER = 3, CASH_MIN = () => Number((DATA.limits||{}).cash_min ?? 8);
 const cumW = nb => LADDER_W[ladderMode()].slice(0, nb).reduce((a,b)=>a+b, 0);
 const todayStr = () => new Date().toISOString().slice(0,10);
@@ -705,7 +748,7 @@ const weakR = s => /^B/.test(ratingOf(s));
 function gate(s, nb){
   const g = {nb, raw: nb};
   if (!nb) return g;
-  if (s.wbreak){ g.wait = "wbreak"; return g; }
+  if (s.wbreak && s.mode !== "网格"){ g.wait = "wbreak"; return g; }
   const wm = s.boll && s.boll.w ? s.boll.w[1] : null;
   if (wm && s.price > wm){ g.wait = "wmid"; g.wm = wm; return g; }
   if (s.below250 && weakR(s) && nb > 1){ g.nb = 1; g.capped250 = true; }
@@ -725,6 +768,7 @@ function migratePlans(){   // 旧版“计划仓位（新币）”换算成占�
 function roundLot(n, lot){ return lot ? Math.floor(n / lot) * lot : Math.floor(n); }
 /* 同一部分的买入额度：按股息率分位从高到低（最便宜的先）分配，不超过该部分目标和单只上限 */
 let ALLOC = {};
+const pairOf = s => DATA.stocks.find(x => x !== s && ((s.pair && x.code === s.pair) || (x.pair && x.pair === s.code)));
 function computeAlloc(){
   const P = portfolio(), T = targets(), cap = (DATA.limits||{}).stock || 15, out = {}, byB = {};
   DATA.stocks.forEach(s=>{
@@ -736,7 +780,11 @@ function computeAlloc(){
     const gap = cumW(nb) * plan - inv; if (gap <= 0) return;
     const deep = nb >= 2 ? Math.max(0, cumW(nb) * plan - Math.max(inv, cumW(1) * plan)) : 0;   // 第 2、3 档那部分，可动用现金垫
     const base = isA(s) ? P.a.total : P.total;
-    const stockRoom = base ? cap/100 * base - (h ? h.mvS : 0) : gap;
+    let stockRoom = base ? cap/100 * base - (h ? h.mvS : 0) : gap;
+    // 同一家公司的 A 股和 H 股合并算上限：两边市值合计 ≤ 两个账户总资产的 cap%
+    const pr = pairOf(s);
+    if (pr){ const ph = holding(pr), all = P.total + P.a.total;
+      if (all > 0) stockRoom = Math.min(stockRoom, cap/100 * all - (h ? h.mvS : 0) - (ph ? ph.mvS : 0)); }
     (byB[s.bucket] ||= []).push({s, gap, stockRoom, deep});
   });
   Object.entries(byB).forEach(([b, list])=>{
@@ -762,6 +810,8 @@ function computeAlloc(){
     });
   return out;
 }
+/* 金额显示：A股账户用人民币，新币账户用新币（内部统一按新币计算） */
+const amt = (s, sgdV) => isA(s) ? `¥${money(sgdV / (s.fx || 1))}` : `S$${money(sgdV)}`;
 function advice(s){
   const L = s.ladder; if (!L || s.yield_gross == null) return null;
   const id = k(s), W = LADDER_W[ladderMode()], yg = s.yield_gross, lot = s.lot;
@@ -770,7 +820,7 @@ function advice(s){
   const G = gate(s, L.buy.filter(l => yg >= l.y - 1e-9).length), nb = G.nb;
   const ns = L.sell.filter(l => yg <= l.y + 1e-9).length;
   const nextBuy = L.buy[nb], nextSell = L.sell[ns];
-  const out = {nb, ns, plan, planPct, W, nextBuy, nextSell};
+  const out = {nb, ns, plan, planPct, W, nextBuy, nextSell, G};
   if (nb > 0){
     const cum = W.slice(0, nb).reduce((a,b)=>a+b, 0);
     out.type = "buy"; out.cum = cum;
@@ -794,12 +844,12 @@ function advice(s){
     if (n <= 0){
       out.type = "hold"; out.text = `第 ${nb} 档已建够（计划的 ${Math.round(cum*100)}%）`; out.short = "本档已建够";
       if (G.capped250){ out.text = `股息率已到第 ${G.raw} 档，但股价在 250 日线下、公司评级 ${ratingOf(s)}：暂停第 2、3 档，第 1 档已建够`; out.short = "暂停加仓"; }
-      if (lot && gap > 0){ out.text = `第 ${nb} 档：这次可投约 S$${money(gap)}，不足一手（一手约 S$${money(lotS)}），等额度够了或下一档再买`; out.short = "不足一手"; }
+      if (lot && gap > 0){ out.text = `第 ${nb} 档：这次可投约 ${amt(s,gap)}，不足一手（一手约 ${amt(s,lotS)}），等额度够了或下一档再买`; out.short = "不足一手"; }
       if (al.why && al.gap > 0){ out.text = `第 ${nb} 档价位到了，但暂不买：${al.why}`; out.short = "额度已满"; }
       return out;
     }
-    out.text = `第 ${nb} 档：建议买入约 S$${money(out.amount)}（${n.toLocaleString()} 股${lot?`，${n/lot} 手`:""}），累计到计划的 ${Math.round(cum*100)}%`;
-    out.short = `买 S$${money(out.amount)}`;
+    out.text = `第 ${nb} 档：建议买入约 ${amt(s,out.amount)}（${n.toLocaleString()} 股${lot?`，${n/lot} 手`:""}），累计到计划的 ${Math.round(cum*100)}%`;
+    out.short = `买 ${amt(s,out.amount)}`;
     if (G.capped250) out.text += `；股息率已到第 ${G.raw} 档，但股价在 250 日线下、公司评级 ${ratingOf(s)}，只建到第 1 档，站回 250 日线或评级回到 A 再加`;
     if (ratingMul(s) !== 1) out.text += `；评级 ${ratingOf(s)}，计划仓位按 ${ratingMul(s)} 倍算`;
     if (out.capped) out.text += `；金额已调低：${out.capped}`;
@@ -809,14 +859,17 @@ function advice(s){
   }
   if (ns > 0 && shares > 0){
     const peak = Math.max(Number(ST.peak[id]) || 0, shares);
-    const keep = ns >= 2 ? 1/3 : 2/3, target = peak * keep;
-    const n = roundLot(shares - target, lot);
+    const lvS = L.sell[ns-1], keep = lvS.keep ?? (ns >= 2 ? 1/3 : 2/3);
+    // 网格（A/H）按计划仓位算：卖到计划的 2/3、1/3、0；分位（新加坡/香港本地）按最高持股算：卖一半、卖光
+    const target = L.basis === "plan" && plan ? keep * plan / s.fx / s.price : peak * keep;
+    const n = keep <= 0 ? shares : Math.min(shares, roundLot(shares - target, lot));
+    const keepTxt = keep <= 0 ? "全部卖出" : L.basis === "plan" ? `保留到计划的 ${Math.round(keep*3)}/3` : `保留最高持股的 ${keep === 0.5 ? "一半" : Math.round(keep*100)+"%"}`;
     out.type = n > 0 ? "sell" : "hold";
     if (n > 0){
       out.shares = n; out.amount = n * s.price * s.fx;
-      out.text = `减仓第 ${ns} 档：建议卖出 ${n.toLocaleString()} 股（约 S$${money(out.amount)}），保留最高持股的 ${ns>=2?"1/3（底仓）":"2/3"}`;
+      out.text = `减仓第 ${ns} 档：建议卖出 ${n.toLocaleString()} 股（约 ${amt(s,out.amount)}），${keepTxt}`;
       out.short = `卖 ${n.toLocaleString()} 股`;
-    } else { out.text = `减仓第 ${ns} 档已减到位，剩下的作为底仓`; out.short = "已减到位"; }
+    } else { out.text = `减仓第 ${ns} 档已减到位（${keepTxt}）`; out.short = "已减到位"; }
     return out;
   }
   out.type = "hold";
@@ -829,8 +882,11 @@ function advice(s){
 function adviceCell(s){
   const a = advice(s); if (!a) return `<span class="muted small">-</span>`;
   const cls = a.type === "buy" ? "买入确认" : a.type === "sell" ? "跌破" : "中部";
-  const nxt = a.type === "sell" || (a.ns > 0) ? (a.nextSell ? `下一档 ≥ ${f(a.nextSell.price,pf(s))}` : "")
+  let nxt = a.type === "sell" || (a.ns > 0) ? (a.nextSell ? `下一档 ≥ ${f(a.nextSell.price,pf(s))}` : "")
     : (a.nextBuy ? `下一档 ≤ ${f(a.nextBuy.price,pf(s))}` : "已到最后一档");
+  if (a.G && a.G.wait === "wbreak") nxt = `收盘站上 ${f(s.boll.w[0],pf(s))} 再买（已到第 ${a.G.raw} 档）`;
+  else if (a.G && a.G.wait === "wmid") nxt = `跌回 ≤ ${f(a.G.wm,pf(s))} 再买（已到第 ${a.G.raw} 档）`;
+  else if (a.G && a.G.capped250) nxt = `第 ${a.G.raw} 档也已到价，但评级 ${ratingOf(s)}、在 250 日线下，暂停加仓`;
   return `<span class="sw ${cls}">${esc(a.short)}</span>${a.needPlan?`<div class="mini">填计划占比后算金额</div>`:""}<div class="mini num">${nxt}</div>`;
 }
 function ladderBox(s){
@@ -838,17 +894,17 @@ function ladderBox(s){
   const yg = s.yield_gross, W = a.W;
   let cum = 0;
   const buyRows = L.buy.map((l,i)=>{ cum += W[i]; const hit = yg >= l.y - 1e-9;
-    const basis = s.mode === "分位" ? ["中位数（税后≥"+(DATA.floor_net??4.5)+"%）","80 分位","90 分位"][i] : ["买入线−0.5","买入线","买入线+0.5"][i];
+    const basis = s.mode === "网格" ? `税前 ${l.y}%` : s.mode === "分位" ? ["中位数（税后≥"+(DATA.floor_net??4.5)+"%）","80 分位","90 分位"][i] : ["买入线−0.5","买入线","买入线+0.5"][i];
     return `<tr><td><span class="sw ${hit?"买入确认":"买入区"}">买 ${i+1}</span><div class="mini">${basis}</div></td><td class="num">${cur(s)}${f(l.price,pf(s))}</td><td class="num">${f(l.yn)}%</td>
       <td class="num">${Math.round(W[i]*100)}% → 累计 ${Math.round(cum*100)}%${a.plan?`<div class="mini">S$${money(a.plan*W[i])}</div>`:""}</td><td class="num small">${hit?"已达":"需跌 "+f((1-l.price/s.price)*100,1)+"%"}</td></tr>`; }).join("");
   const sellRows = L.sell.map((l,i)=>{ const hit = yg <= l.y + 1e-9;
-    return `<tr><td><span class="sw ${hit?"跌破":"卖出区"}">减 ${i+1}</span><div class="mini">${s.mode==="分位"?["20 分位","10 分位"][i]:["减仓线","减仓线−0.5"][i]}</div></td><td class="num">${cur(s)}${f(l.price,pf(s))}</td><td class="num">${f(l.yn)}%</td>
-      <td class="num">卖 1/3 → 保留 ${i===0?"2/3":"1/3"}</td><td class="num small">${hit?"已达":"需涨 "+f((l.price/s.price-1)*100,1)+"%"}</td></tr>`; }).join("");
+    return `<tr><td><span class="sw ${hit?"跌破":"卖出区"}">减 ${i+1}</span><div class="mini">${s.mode==="网格"?`税前 ${l.y}%`:s.mode==="分位"?["20 分位","10 分位"][i]:["减仓线","减仓线−0.5"][i]}</div></td><td class="num">${cur(s)}${f(l.price,pf(s))}</td><td class="num">${f(l.yn)}%</td>
+      <td class="num">${l.keep == null ? `卖 1/3 → 保留 ${i===0?"2/3":"1/3"}` : l.keep <= 0 ? "全部卖出" : L.basis === "plan" ? `卖到计划的 ${Math.round(l.keep*3)}/3` : "卖一半"}</td><td class="num small">${hit?"已达":"需涨 "+f((l.price/s.price-1)*100,1)+"%"}</td></tr>`; }).join("");
   return `<div style="margin-bottom:12px">
-    <div class="hint" style="margin-bottom:6px">分批计划（第一笔 50%、第 2、3 档各 25%，按近 ${s.win_years||10} 年股息率分布）${a.plan?` · 计划占总资产 ${f(a.planPct,1)}%${ratingMul(s)!==1?`（填的 ${f(Number(ST.planPct[k(s)])||0,1)}% × 评级 ${ratingOf(s)} ${ratingMul(s)} 倍）`:""}，现在约 S$${money(a.plan)}（更新现金后自动调整）`:` · <button class="link" data-edit="${k(s)}">填计划占比</button>`}</div>
+    <div class="hint" style="margin-bottom:6px">分批计划（每档 1/3，${s.mode === "网格" ? "吴富贵网格：税前股息率 5% / 5.5% / 6% 买，4.5% / 4% / 3.5% 卖" : `按近 ${s.win_years||10} 年股息率分布`}）${a.plan?` · 计划占总资产 ${f(a.planPct,1)}%${ratingMul(s)!==1?`（填的 ${f(Number(ST.planPct[k(s)])||0,1)}% × 评级 ${ratingOf(s)} ${ratingMul(s)} 倍）`:""}，现在约 S$${money(a.plan)}（更新现金后自动调整）`:` · <button class="link" data-edit="${k(s)}">填计划占比</button>`}</div>
     <div class="warnbox ${a.type==="sell"?"bad":a.type==="buy"?"ok":""}" style="${a.type==="hold"?"background:var(--soft);color:var(--ink)":""}">${esc(a.text)}</div>
     <div class="tw"><table class="tbl small"><thead><tr><th>档位</th><th>价格</th><th>税后股息率</th><th>仓位</th><th>距离</th></tr></thead><tbody>${buyRows}${sellRows}</tbody></table></div>
-    <div class="mini" style="margin-top:4px">剩下 1/3 作为底仓长期持有；单只超过组合 ${(DATA.limits||{}).stock||15}% 时减回 12% 左右；每次加仓前先确认分红没有削减。</div>
+    <div class="mini" style="margin-top:4px">${s.mode === "网格" ? "价格在周线中轨上方时不买；6% 买满就不再加。" : "20 分位卖一半、10 分位卖光，跌回买点再买回来。"}单只（A/H 两边合计）超过 ${(DATA.limits||{}).stock||15}% 时减回 12% 左右；每次加仓前先确认分红没有削减。</div>
   </div>`;
 }
 
@@ -914,7 +970,7 @@ function monthlyCard(P, T){
       <span style="margin-left:auto" class="alloc small">现金余额 S$ <input type="number" id="cashIn" value="${P.cash}" min="0" step="100" style="width:110px"></span></div>
     <div class="card-b small">
       ${last?`上次更新 <b>${last.date}</b>（${age} 天前）${age>35?' <span class="pend">已超过一个月，记得更新</span>':""}${delta!=null?` · 比上次 ${delta>=0?"+":"−"}S$${money(Math.abs(delta))}`:""}`:'<span class="pend">还没记录过现金余额</span>'}
-      ${split?`<div style="margin-top:4px">这笔新增按目标比例相当于：${split}。股票部分不用马上买完，等进入买入区再按档投入（第一笔 50%，后两档各 25%）。</div>`:""}
+      ${split?`<div style="margin-top:4px">这笔新增按目标比例相当于：${split}。股票部分不用马上买完，等进入买入区再按 1/3 一档投入。</div>`:""}
     </div>
     <div class="tw"><table class="tbl"><thead><tr><th>部分</th><th>目标</th><th>现在</th><th>已分给个股的计划</th><th>还可投入</th></tr></thead><tbody>${rows}</tbody></table></div>
     <div class="card-b small" style="border-top:1px solid var(--line)"><b>A股账户（东方财富，另一笔资金）</b>
@@ -991,7 +1047,18 @@ function viewReview(){
   const nm = s => `<b>${esc(s.name)}</b> <span class="mk ${s.market}">${MKNAME[s.market]}</span>`;
   const past = Object.entries(ST.reviews).filter(([w,r])=>w!==wk && r.note).sort((a,b)=>b[0].localeCompare(a[0])).slice(0,8);
   const done = rv.checks.filter(Boolean).length;
-  return `<div class="stats">
+  // 邮件名单：持有底仓 / 做滚动波段的股票，和 watchlist 里的名单对比
+  const listCard = (() => {
+    const D = DATA.defaults || {};
+    const want1 = DATA.stocks.filter(x=>holding(x)).map(x=>String(x.code)), have1 = (D.base_holding||[]).map(String);
+    const want2 = DATA.stocks.filter(x=>x.mode!=="网格" && swingOpen(x).shares).map(x=>String(x.code)), have2 = (D.roll_holding||[]).map(String);
+    const same = (a,b)=>a.length===b.length && a.every(c=>b.includes(c));
+    const line = (nm, w, hv, what) => same(w,hv) ? `<div>✓ ${nm} 已是最新${w.length?`（${w.map(esc).join("、")}）`:""}</div>`
+      : `<div><b>${nm}要更新</b>：把 watchlist.yaml 里那一行改成 <code>${nm}: [${w.map(c=>`"${esc(c)}"`).join(", ")}]</code>（${what}）</div>`;
+    return `<div class="card"><div class="card-h"><h2>邮件名单</h2><span class="hint">程序看不到你浏览器里的持仓，靠这两个名单决定发哪些提醒</span></div>
+      <div class="card-b small">${line("base_holding", want1, have1, "到减仓档的提醒只发给这些")}${line("roll_holding", want2, have2, "滚动波段的补仓 / 卖出 / 止损提醒只发给这些")}</div></div>`;
+  })();
+  return `${listCard}<div class="stats">
       <div class="card stat"><div class="l">本周（${wk}）</div><div class="v num">${done}/${CHECKS.length}</div><div class="s">复盘清单完成</div></div>
       <div class="card stat"><div class="l">新加坡 近5日</div><div class="v num ${sign(mkWeek("SG"))}">${pctTxt(mkWeek("SG"))}</div><div class="s">观察池平均</div></div>
       <div class="card stat"><div class="l">港股 近5日</div><div class="v num ${sign(mkWeek("HK"))}">${pctTxt(mkWeek("HK"))}</div><div class="s">观察池平均</div></div>
