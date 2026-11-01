@@ -187,6 +187,112 @@ def portfolio(stocks, targets, weights, over, weeks):
     return navs, inv
 
 
+# ---------------- 波段：三种规则 ----------------
+RT_FEE = {"A": 0.0015, "HK": 0.0035, "SG": 0.0025}   # 一买一卖的总费用（近似）
+SWINGS = [("ma", "5 日线上穿 13 日线买，下穿卖"),
+          ("ma250", "同上，但只在 250 日线上方做（跌破 250 日线也卖）"),
+          ("roll", "滚动四条规则（日线下轨+周线中下轨+税后≥5%+250 日线上；周线上轨卖；周收破 250 日线止损）")]
+
+
+def _ma(xs, n):
+    out, run = [None] * len(xs), 0.0
+    for i, x in enumerate(xs):
+        run += x
+        if i >= n:
+            run -= xs[i - n]
+        if i >= n - 1:
+            out[i] = run / n
+    return out
+
+
+def _boll_series(xs, n=20):
+    out = [None] * len(xs)
+    for i in range(n - 1, len(xs)):
+        w = xs[i - n + 1:i + 1]
+        m = sum(w) / n
+        sd = (sum((x - m) ** 2 for x in w) / n) ** 0.5
+        out[i] = (m - 2 * sd, m, m + 2 * sd)
+    return out
+
+
+def swing_test(h, mk, tax, days):
+    """逐日模拟，信号用当天收盘，第二天收盘成交；持有期间的收益用复权价（含分红），空仓现金年化 1.5%。"""
+    adj, raw, dates = h["adj"], h["raw"], h["dates"]
+    n = len(adj)
+    t0 = max(260, n - days)
+    if n - t0 < 250:
+        return None
+    ma5, ma13, ma250 = _ma(adj, 5), _ma(adj, 13), _ma(adj, 250)
+    bd = _boll_series(adj)
+    dd, dv = [x for x, _ in h["divs"]], [v for _, v in h["divs"]]
+    # 周线：每天对应“截至当天”的周线布林（本周用当天收盘）
+    wk_close, wk_key, wb, wk_end = [], None, [None] * n, [False] * n
+    for i in range(n):
+        k = date.fromisoformat(dates[i]).isocalendar()[:2]
+        if k != wk_key:
+            wk_close.append(adj[i]); wk_key = k
+        else:
+            wk_close[-1] = adj[i]
+        if len(wk_close) >= 20:
+            w = wk_close[-20:]
+            m = sum(w) / 20
+            sd = (sum((x - m) ** 2 for x in w) / 20) ** 0.5
+            wb[i] = (m - 2 * sd, m, m + 2 * sd)
+        if i + 1 < n and date.fromisoformat(dates[i + 1]).isocalendar()[:2] != k:
+            wk_end[i] = True
+    fee = RT_FEE.get(mk, 0.0025) / 2
+    res = {}
+    for name, _ in SWINGS:
+        cash, sh, pos = 1.0, 0.0, False
+        pending, nav, trades, wins, entry, inmkt = None, [], 0, 0, 0.0, 0
+        for i in range(t0, n):
+            p = adj[i]
+            if pending == "buy" and not pos:
+                sh = cash * (1 - fee) / p; cash = 0.0; pos = True; entry = p; trades += 1
+            elif pending == "sell" and pos:
+                cash = sh * p * (1 - fee); sh = 0.0; pos = False
+                wins += p > entry * (1 + 2 * fee)
+            pending = None
+            if not pos:
+                cash *= 1 + 0.015 / 252
+            else:
+                inmkt += 1
+            nav.append(cash + sh * p)
+            # 当天收盘出信号
+            up = ma5[i] > ma13[i] and ma5[i - 1] <= ma13[i - 1]
+            dn = ma5[i] < ma13[i] and ma5[i - 1] >= ma13[i - 1]
+            above = ma250[i] is not None and p >= ma250[i]
+            if name == "ma":
+                pending = "buy" if up and not pos else ("sell" if dn and pos else None)
+            elif name == "ma250":
+                if not pos and up and above:
+                    pending = "buy"
+                elif pos and (dn or not above):
+                    pending = "sell"
+            else:
+                if not pos:
+                    if bd[i] and wb[i] and above:
+                        ttm = build.ttm_div(dd, dv, dates[i])
+                        yn = ttm / raw[i] * 100 * (1 - tax / 100) if raw[i] > 0 else 0
+                        if p <= bd[i][0] * 1.02 and wb[i][0] * 0.98 <= p <= wb[i][1] and yn >= 5:
+                            pending = "buy"
+                else:
+                    if wb[i] and p >= wb[i][2] * 0.98:
+                        pending = "sell"
+                    elif wk_end[i] and not above:
+                        pending = "sell"
+        yrs = len(nav) / 252
+        mdd, top = 0.0, nav[0]
+        for v in nav:
+            top = max(top, v); mdd = min(mdd, v / top - 1)
+        res[name] = {"cagr": ((nav[-1] / nav[0]) ** (1 / yrs) - 1) * 100, "mdd": mdd * 100,
+                     "tpy": trades / yrs, "win": (wins / trades * 100) if trades else None,
+                     "inmkt": inmkt / len(nav) * 100}
+    res["hold"] = ((adj[-1] / adj[t0]) ** (252 / (n - t0)) - 1) * 100
+    res["from"] = dates[t0]
+    return res
+
+
 def stats(navs, invested):
     n = len(navs)
     yrs = n / 52
@@ -203,12 +309,15 @@ def main():
     cfg = yaml.safe_load((HERE / "watchlist.yaml").read_text(encoding="utf-8"))
     d = cfg["defaults"]
     floor_net = float(d.get("floor_net", 4.5))
-    results, failed, prepared = [], [], []
+    results, failed, prepared, swing_res = [], [], [], []
     for s in cfg["stocks"]:
         mk = s.get("market", "A")
         tax = float(s["tax"]) if s.get("tax") is not None else float(d.get({"A": "tax_a", "HK": "tax_hk", "SG": "tax_sg"}[mk], 0))
         try:
             h = build.history(s["code"], mk)
+            sw_ = swing_test(h, mk, tax, YEARS * 252)
+            if sw_:
+                swing_res.append((s, sw_))
             rows = prepare(h, tax, floor_net)
         except Exception as e:
             failed.append(f"{s['name']}：{str(e)[:80]}")
@@ -245,6 +354,30 @@ def main():
 
     # ---- 账户级：分批比例 × 候选超额 ----
     targets = {b: float(v) / 100 for b, v in (cfg.get("targets") or {}).items() if b not in ("现金",) and float(v) > 0}
+    # ---- 波段汇总 ----
+    def sw_avg(k, f):
+        xs = [r[k][f] for _, r in swing_res if r[k][f] is not None]
+        return sum(xs) / len(xs) if xs else 0
+
+    def sw_med(k, f="cagr"):
+        xs = sorted(r[k][f] for _, r in swing_res)
+        return xs[len(xs) // 2] if xs else 0
+    hold_avg = sum(r["hold"] for _, r in swing_res) / len(swing_res) if swing_res else 0
+    sw_rows = ""
+    for k, label in SWINGS:
+        beat = sum(1 for _, r in swing_res if r[k]["cagr"] > r["hold"])
+        cashbeat = sum(1 for _, r in swing_res if r[k]["cagr"] > 1.5)
+        sw_rows += (f"<tr><td style='white-space:normal;max-width:340px'>{label}</td><td>{sw_avg(k, 'cagr'):.2f}%</td><td>{sw_med(k):.2f}%</td>"
+                    f"<td>{sw_avg(k, 'mdd'):.1f}%</td><td>{sw_avg(k, 'tpy'):.1f}</td><td>{sw_avg(k, 'win'):.0f}%</td>"
+                    f"<td>{sw_avg(k, 'inmkt'):.0f}%</td><td>{beat}/{len(swing_res)}</td><td>{cashbeat}/{len(swing_res)}</td></tr>")
+        print("波段", k, round(sw_avg(k, "cagr"), 2), "胜持有", beat)
+    sw_rows += f"<tr><td>一直持有（对照）</td><td>{hold_avg:.2f}%</td><td>-</td><td>-</td><td>-</td><td>-</td><td>100%</td><td>-</td><td>-</td></tr>"
+    sw_body = "".join(
+        f"<tr><td>{s_['name']} <span class='c'>{s_['code']}</span></td>"
+        + "".join(f"<td>{r[k]['cagr']:.1f}%</td>" for k, _ in SWINGS)
+        + f"<td>{r['hold']:.1f}%</td><td>{r['ma']['tpy']:.1f}</td></tr>"
+        for s_, r in sorted(swing_res, key=lambda x: -(x[1]['ma']['cagr'] - x[1]['hold'])))
+
     port_rows = ""
     for acct, buckets in (("新币账户（新加坡+港股，现金 15%）", {b: t for b, t in targets.items() if b != "A股"}),
                           ("A股账户（全部可投）", {"A股": 1.0})):
@@ -296,6 +429,12 @@ A 比 C 好的 {winAC} 只，C 比 A 好的 {winCA} 只；B 比 C 好的 {winBC}
 <div class="card"><h2>账户级回测：每档比例 × 候选超额（跌破下轨都按“等止跌”）</h2>
 <div class="tw"><table><tr><th>账户</th><th>规则</th><th>年化</th><th>累计</th><th>最大回撤</th><th>平均股票占比</th></tr>{port_rows}</table></div>
 <div class="hint" style="margin-top:6px">从全部现金开始，每周检查。同一部分里每只股票的计划 = 部分目标 × 超额倍数 ÷ 池子里的股票数；股息率分位高的先买，部分总额不超过目标。港股按港币价格计算，没算汇率变化。</div></div>
+<div class="card"><h2>波段规则回测（一笔钱全进全出，和“一直持有同一只股票”比）</h2>
+<div class="tw"><table><tr><th>规则</th><th>平均年化</th><th>中位数</th><th>平均最大回撤</th><th>每年交易次数</th><th>胜率</th><th>持股时间</th><th>跑赢持有</th><th>跑赢现金 1.5%</th></tr>{sw_rows}</table></div>
+<div class="hint" style="margin-top:6px">逐日模拟最近约 {YEARS} 年：当天收盘出信号、第二天收盘成交；持股期间含分红，空仓时现金年化 1.5%；
+扣一买一卖费用（A股 0.15%、港股 0.35%、新加坡 0.25%）。A股波段卖出若持有不满一年还要补分红税，这里没算。</div>
+<details style="margin-top:8px"><summary class="hint">每只股票明细</summary><div class="tw"><table>
+<tr><th>股票</th><th>5/13 均线</th><th>5/13 + 250 日线</th><th>滚动四条</th><th>一直持有</th><th>均线每年交易</th></tr>{sw_body}</table></div></details></div>
 <div class="card"><h2>每只股票（按“照买 − 等止跌”从大到小）</h2><div class="tw"><table>
 <tr><th>股票</th><th>下轨下方买点（周）</th><th>A 等止跌</th><th>B 先买一半</th><th>C 照买</th><th>一直持有</th></tr>{body}</table></div></div>
 <div class="card hint">说明：没有模拟公司评级、250 日线和波段仓；股票池是按今天挑的，有幸存者偏差（当年分红出问题被剔除的股票不在里面），
