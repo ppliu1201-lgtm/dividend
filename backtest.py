@@ -227,7 +227,8 @@ STRATS = [("ours", "我们的规则：分位三档（中位数且税后≥4.5% /
           ("fg", "吴富贵网格：税前股息率 5% / 5.5% / 6% 各买 1/3（中轨下才买）；每份涨回 0.5 个点卖（6→5.5、5.5→5、5→4.5），4% 清仓"),
           ("fg2", "网格买法，卖得更晚：股息率 4.5% / 4% / 3.5% 各卖 1/3，3% 清仓")]
 FG_BUY = (5.0, 5.5, 6.0)
-FG_SELL = {"fg": (4.5, 5.0, 5.5), "fg2": (3.5, 4.0, 4.5)}   # 股息率 ≤ 第 k 个值时，最多只能留 k 份
+FG_SELL = {"fg": (4.5, 5.0, 5.5), "fg2": (3.5, 4.0, 4.5),
+           "fg3": (3.5, 5.0, 5.5)}   # fg3：6% 和 5.5% 买的两份涨回 0.5 个点就卖（吃来回波动），5% 买的第一份拿到 3.5%   # 股息率 ≤ 第 k 个值时，最多只能留 k 份
 
 
 def strat_targets(strat, r, frac, peak):
@@ -286,14 +287,21 @@ def simulate_s(rows, strat):
     return navs, inv
 
 
-def portfolio_s(stocks, targets, over, weeks, strat):
-    """账户级：和 portfolio() 一样按部分封顶、候选超额，但买卖规则换成 strat。"""
+def portfolio_s(stocks, targets, over, weeks, strat, ov_grid=None, ov_roll=None, ov_scale=0.3, ov_pot=None):
+    """账户级：和 portfolio() 一样按部分封顶、候选超额，但买卖规则换成 strat。
+    ov_grid：每只股票的波段网格规则（如 "fg"）或 None，波段仓计划 = 底仓计划 × ov_scale；
+    ov_roll：每只股票的滚动信号 {wk: 是否持仓} 或 None，每次买已持有底仓的 ov_scale。
+    波段仓在计划之外、用现金买，市值计入所在部分（和看板一致）。返回额外的波段占比。"""
     nb_bucket = {}
     for b, _ in stocks:
         nb_bucket[b] = nb_bucket.get(b, 0) + 1
     cash = 1.0
-    st = [{"sh": 0.0, "units": 0.0, "peak": 0.0, "p": None} for _ in stocks]
-    navs, inv = [], []
+    st = [{"sh": 0.0, "units": 0.0, "peak": 0.0, "p": None, "osh": 0.0, "ou": 0.0, "opk": 0.0} for _ in stocks]
+    navs, inv, oinv = [], [], []
+    sep = ov_pot is not None            # 波段用另外一笔钱（不占账户现金和部分额度）
+    ocash = ov_pot or 0.0
+    pot_navs = []
+    omv = lambda: [x["osh"] * x["p"] if x["p"] else 0.0 for x in st]
     for wk in weeks:
         cash *= 1 + CASH_W
         for i, (b, rows) in enumerate(stocks):
@@ -301,7 +309,9 @@ def portfolio_s(stocks, targets, over, weeks, strat):
             if r:
                 st[i]["p"] = r["adj"]
         mv = [x["sh"] * x["p"] if x["p"] else 0.0 for x in st]
-        nav = cash + sum(mv)
+        nav = cash + sum(mv) + (0 if sep else sum(omv()))
+        if sep:
+            ocash *= 1 + CASH_W
         plans = {b: t * over / max(1, nb_bucket.get(b, 1)) * nav for b, t in targets.items()}
         acts = []
         for i, (b, rows) in enumerate(stocks):
@@ -320,8 +330,9 @@ def portfolio_s(stocks, targets, over, weeks, strat):
                 key = r.get("pct", 0) if sk in ("ours", "ours_hold", "hyb") else min(1.0, 0.5 + (r["y"] - FG_BUY[0]) / 4)
                 acts.append((b, key, i, (buy - frac) * plans[b]))
         mv = [x["sh"] * x["p"] if x["p"] else 0.0 for x in st]
-        nav = cash + sum(mv)
-        room = {bk: t * nav - sum(m for (b, _), m in zip(stocks, mv) if b == bk) for bk, t in targets.items()}
+        om = [0.0] * len(st) if sep else omv()
+        nav = cash + sum(mv) + sum(om)
+        room = {bk: t * nav - sum(m + o for (b, _), m, o in zip(stocks, mv, om) if b == bk) for bk, t in targets.items()}
         for b, _, i, want in sorted(acts, key=lambda a: -a[1]):
             x = st[i]
             amt = min(want, room[b], cash / (1 + COST))
@@ -329,9 +340,59 @@ def portfolio_s(stocks, targets, over, weeks, strat):
                 continue
             x["sh"] += amt / x["p"]; x["units"] += amt; x["peak"] = max(x["peak"], x["units"])
             cash -= amt * (1 + COST); room[b] -= amt
+        # 波段仓（底仓买完之后，用剩下的现金）
+        if ov_grid or ov_roll:
+            for i, (b, rows) in enumerate(stocks):
+                r = rows.get(wk); x = st[i]
+                if not r or b not in plans or not x["p"]:
+                    continue
+                g = ov_grid[i] if ov_grid else None
+                fl = ov_roll[i] if ov_roll else None
+                if g:
+                    oplan = ov_scale * plans[b]            # 波段仓最多 = 这只股票计划（底仓买满）的 30%
+                    if oplan <= 1e-9:
+                        continue
+                    frac = x["ou"] / oplan if oplan else 0
+                    buy, cap = strat_targets(g, r, frac, x["opk"] / oplan if oplan else 0)
+                    if cap is not None and frac > cap + 1e-9 and x["ou"] > 0:
+                        part = (frac - cap) / frac
+                        got = x["osh"] * part * x["p"] * (1 - COST)
+                        if sep: ocash += got
+                        else: cash += got
+                        x["osh"] *= 1 - part; x["ou"] *= 1 - part
+                    elif buy is not None and buy > frac + 1e-9:
+                        amt = min((buy - frac) * oplan, (ocash if sep else cash) / (1 + COST))
+                        if amt > 1e-9:
+                            x["osh"] += amt / x["p"]; x["ou"] += amt; x["opk"] = max(x["opk"], x["ou"])
+                            if sep: ocash -= amt * (1 + COST)
+                            else: cash -= amt * (1 + COST)
+                elif fl:
+                    on = fl.get(wk)
+                    if on is False and x["osh"] > 0:
+                        got = x["osh"] * x["p"] * (1 - COST); x["osh"] = 0.0
+                        if sep: ocash += got
+                        else: cash += got
+                    elif on and x["osh"] == 0 and (sep or x["sh"] > 0):
+                        size = ov_scale * plans[b] if sep else ov_scale * x["sh"] * x["p"]
+                        amt = min(size, (ocash if sep else cash) / (1 + COST))
+                        if amt > 1e-9:
+                            x["osh"] = amt / x["p"]
+                            if sep: ocash -= amt * (1 + COST)
+                            else: cash -= amt * (1 + COST)
         mv = [x["sh"] * x["p"] if x["p"] else 0.0 for x in st]
-        nav = cash + sum(mv)
-        navs.append(nav); inv.append(sum(mv) / nav if nav else 0)
+        om = omv()
+        if sep:
+            nav = cash + sum(mv)
+            pot = ocash + sum(om)
+            pot_navs.append(pot)
+            navs.append(nav + pot); inv.append(sum(mv) / nav if nav else 0); oinv.append(sum(om) / pot if pot else 0)
+        else:
+            nav = cash + sum(mv) + sum(om)
+            navs.append(nav); inv.append(sum(mv) / nav if nav else 0); oinv.append(sum(om) / nav if nav else 0)
+    if sep:
+        return navs, inv, sum(oinv) / len(oinv) * 100, pot_navs
+    if ov_grid or ov_roll:
+        return navs, inv, sum(oinv) / len(oinv) * 100
     return navs, inv
 
 
@@ -538,7 +599,7 @@ def main():
         + f"<td>{r['hold']:.1f}%</td><td>{r['ma']['tpy']:.1f}</td></tr>"
         for s_, r in sorted(swing_res, key=lambda x: -(x[1]['ma']['cagr'] - x[1]['hold'])))
 
-    port_rows, crowd_rows, hi_rows = "", "", ""
+    port_rows, crowd_rows, hi_rows, sw2_rows = "", "", "", ""
     for acct, buckets in (("新币账户（新加坡+港股，现金 15%）", {b: t for b, t in targets.items() if b != "A股"}),
                           ("A股账户（全部可投）", {"A股": 1.0})):
         ss = [(b, rows) for b, rows, _, _, _ in prepared if b in buckets]
@@ -562,7 +623,8 @@ def main():
                            f"<td>{st3['mdd']:.1f}%</td><td>{st3['inv']:.0f}%</td><td>-</td></tr>")
             print("账户策略", acct[:4], k, {kk: round(v, 2) for kk, v in st3.items()})
         # 混合：新加坡 + 香港本地公司用我们的规则，A 股和 H 股（内地公司）用网格
-        for fgk, fgname in (("fg", "网格（原帖）"), ("fg2", "网格卖得更晚")):
+        for fgk, fgname in (("fg", "网格（原帖）"), ("fg2", "网格卖得更晚"),
+                            ("fg3", "网格：上面两份做差价（6%→5.5%、5.5%→5% 卖），第一份拿到 3.5%")):
             mix = ["ours" if kd in ("SG", "HKL") else fgk for kd in kinds]
             navs, inv = portfolio_s(ss, buckets, 3, weeks, mix)
             st4 = stats(navs, inv)
@@ -579,6 +641,27 @@ def main():
             hi_rows += (f"<tr><td>{acct}</td><td style='white-space:normal;max-width:380px'>{oname}</td><td>{st5['cagr']:.2f}%</td>"
                         f"<td>{st5['mdd']:.1f}%</td><td>{st5['inv']:.0f}%</td></tr>")
             print("高股息", acct[:4], opt or "base", {kk: round(v, 2) for kk, v in st5.items()})
+        # 底仓混合 2 + 另外一笔钱做波段（波段仓最多 = 该股底仓的 30%）
+        base_mix = ["ours" if kd in ("SG", "HKL") else "fg2" for kd in kinds]
+        roll_flags = [(wp or {}).get("roll") for wp in swp]
+        pot0 = 0.3 * sum(buckets.values())          # 波段资金 = 股票部分的 30%
+        base_navs6, base_inv6 = portfolio_s(ss, buckets, 3, weeks, base_mix)
+        b6 = stats(base_navs6, base_inv6)
+        sw2_rows += (f"<tr><td>{acct}</td><td>只有底仓（对照，波段资金放现金 1.5%）</td>"
+                     f"<td>{stats([n + pot0 * (1 + CASH_W) ** (k + 1) for k, n in enumerate(base_navs6)], base_inv6)['cagr']:.2f}%</td>"
+                     f"<td>{b6['mdd']:.1f}%</td><td>1.50%</td><td>0%</td></tr>")
+        for oname, og, orl in (("波段：全部用滚动四条", None, roll_flags),
+                               ("波段：A/H 股用富贵原帖网格，新加坡/香港本地用滚动四条",
+                                ["fg" if kd in ("A", "H") else None for kd in kinds],
+                                [fl if kd in ("SG", "HKL") else None for fl, kd in zip(roll_flags, kinds)]),
+                               ("波段：全部用富贵原帖网格", ["fg"] * len(kinds), None),
+                               ("波段：A/H 股用富贵原帖网格，新加坡/香港本地不做", ["fg" if kd in ("A", "H") else None for kd in kinds], None)):
+            navs, inv, osw, pots = portfolio_s(ss, buckets, 3, weeks, base_mix, ov_grid=og, ov_roll=orl, ov_pot=pot0)
+            st6 = stats(navs, inv)
+            pst = stats(pots, [0] * len(pots))
+            sw2_rows += (f"<tr><td>{acct}</td><td style='white-space:normal;max-width:380px'>{oname}</td><td>{st6['cagr']:.2f}%</td>"
+                         f"<td>{st6['mdd']:.1f}%</td><td>{pst['cagr']:.2f}%</td><td>{osw:.0f}%</td></tr>")
+            print("混合2+波段", acct[:4], oname[:14], round(st6["cagr"], 2), "波段资金", round(pst["cagr"], 2), round(osw))
         # 波段仓会不会挤掉底仓（每档 1/3 · 超额 3 倍）
         base_navs, base_inv = portfolio(ss, buckets, "equal", 3, weeks)
         base_st = stats(base_navs, base_inv)
@@ -638,6 +721,10 @@ A 比 C 好的 {winAC} 只，C 比 A 好的 {winCA} 只；B 比 C 好的 {winBC}
 <div class="card"><h2>网格买到 6% 以后怎么办（混合 2：新加坡/香港本地用我们的规则，A/H 股用网格卖得更晚）</h2>
 <div class="tw"><table><tr><th>账户</th><th>A/H 股网格的做法</th><th>年化</th><th>最大回撤</th><th>平均股票占比</th></tr>{hi_rows}</table></div>
 <div class="hint" style="margin-top:6px">继续加格时，多出来的两格先卖：股息率回到 5.5%、5% 时各卖一格，之后照常 4.5% / 4% / 3.5%。“中位数”用该股近 5 年股息率。</div></div>
+<div class="card"><h2>底仓用混合 2，波段仓用哪种规则？</h2>
+<div class="tw"><table><tr><th>账户</th><th>波段做法</th><th>底仓 + 波段合计年化</th><th>合计最大回撤</th><th>波段资金自己的年化</th><th>波段资金平均使用率</th></tr>{sw2_rows}</table></div>
+<div class="hint" style="margin-top:6px">底仓：新加坡/香港本地用我们的规则，A/H 股用网格卖得更晚。波段网格：5% / 5.5% / 6% 各买 1/3，每份涨回 0.5 个点卖（6→5.5、5.5→5、5→4.5）。
+波段用另外一笔钱（= 股票部分的 30%，不占账户现金和部分额度），每只股票的波段仓最多 = 该股计划仓位（底仓买满时）的 30%，没有底仓也可以做；闲置时按年化 1.5% 计息。</div></div>
 <div class="card"><h2>波段仓会不会挤掉底仓的钱？（账户级，每档 1/3 · 超额 3 倍）</h2>
 <div class="tw"><table><tr><th>账户</th><th>波段做法</th><th>账户年化</th><th>平均底仓占比</th><th>平均波段占比</th><th>底仓被挤的周数</th><th>底仓占比比不做波段少</th><th>现金用光的周数</th></tr>{crowd_rows}</table></div>
 <div class="hint" style="margin-top:6px">波段仓在计划之外、用账户现金买，市值和看板一样计入所在部分；“被挤”= 如果没有波段仓，那一周本来能多买的底仓。
