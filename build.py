@@ -180,6 +180,47 @@ def fetch_valuation_yf(code, market):
         return None
 
 
+def fetch_profit(code, market):
+    """最近的利润同比（用于自动评级）。优先“最近一季 vs 去年同一季”，没有季度数据就用“最近一年 vs 前一年”。"""
+    if MOCK:
+        r = random.Random(code + "p")
+        return {"g": round(r.uniform(-35, 25), 1), "basis": "最近一季同比（模拟）", "period": "2026-09-30"}
+    try:
+        import yfinance as yf
+
+        t = yf.Ticker(code + ".SI" if market == "SG" else yf_symbol(code, market))
+        names = ("Net Income Common Stockholders", "Net Income", "Net Income From Continuing Operation Net Minority Interest")
+
+        def series(df):
+            if df is None or df.empty:
+                return None
+            for nm in names:
+                if nm in df.index:
+                    row = df.loc[nm].dropna()
+                    if len(row):
+                        return row.sort_index(ascending=False)
+            return None
+        q = series(t.quarterly_income_stmt)
+        if q is not None and len(q) >= 5 and q.iloc[4] > 0:
+            return {"g": round((q.iloc[0] / q.iloc[4] - 1) * 100, 1), "basis": "最近一季同比",
+                    "period": str(q.index[0])[:10]}
+        a = series(t.income_stmt)
+        if a is not None and len(a) >= 2 and a.iloc[1] > 0:
+            return {"g": round((a.iloc[0] / a.iloc[1] - 1) * 100, 1), "basis": "最近一年同比",
+                    "period": str(a.index[0])[:10]}
+    except Exception as e:
+        print("利润数据失败", code, e)
+    return None
+
+
+def auto_rating(profit, dps):
+    """吴富贵的打分：有分红 + 业绩涨 A+ / 横盘 A- / 跌 B / 差 B-。"""
+    if not profit or not (dps > 0):
+        return None
+    g = profit["g"]
+    return "A+" if g >= 5 else ("A-" if g >= -5 else ("B" if g >= -20 else "B-"))
+
+
 def fetch_fx(cfg):
     """返回 1 单位外币 = ? SGD"""
     fb = {"CNY": 0.18, "HKD": 0.167, "SGD": 1.0}
@@ -421,6 +462,12 @@ def build_stock(s, cfg, fx):
     dps_net = dps * (1 - tax / 100)
     yg = dps / price * 100 if dps > 0 else None
     yn = dps_net / price * 100 if dps > 0 else None
+    yg_prev = dps / h["raw"][-2] * 100 if dps > 0 and len(h["raw"]) > 1 and h["raw"][-2] > 0 else None
+    # 新加坡 / 香港本地公司：和自己历史比（分位）；A 股和 H 股（内地公司）：吴富贵网格（固定股息率）
+    kind = "SG" if mk == "SG" else ("A" if mk == "A" else ("HKL" if tax == 0 else "H"))
+    gridm = kind in (d.get("grid_kinds") or ["A", "H"]) and not s.get("no_grid")
+    g_buy = [float(x) for x in d.get("grid_buy", [5.0, 5.5, 6.0])]
+    g_sell = [float(x) for x in d.get("grid_sell", [4.5, 4.0, 3.5])]
 
     # ---- 历史股息率分位 ----
     yh_full = yield_history(h)
@@ -483,7 +530,16 @@ def build_stock(s, cfg, fx):
         b3 = max(b3, b2 * 1.06)
         s2 = min(s2, s1 * 0.94)
         lv = lambda y: {"y": round(y, 3), "yn": round(y * (1 - tax / 100), 2), "price": round(dps / (y / 100), 4)}
-        ladder = {"buy": [lv(b1), lv(b2), lv(b3)], "sell": [lv(s1), lv(s2)] if s2 > 0 else [lv(s1)]}
+        # 卖：20 分位卖一半、10 分位卖光（回测：比“留 1/3”回撤更小，前半段更好）
+        sl = [dict(lv(s1), keep=0.5), dict(lv(s2), keep=0.0)] if s2 > 0 else [dict(lv(s1), keep=0.0)]
+        ladder = {"buy": [lv(b1), lv(b2), lv(b3)], "sell": sl, "basis": "peak"}
+    if gridm and dps > 0:
+        lvg = lambda y: {"y": y, "yn": round(y * (1 - tax / 100), 2), "price": round(dps / (y / 100), 4)}
+        keeps = [round(1 - (k + 1) / len(g_sell), 4) for k in range(len(g_sell))]      # 2/3, 1/3, 0（按计划仓位）
+        ladder = {"buy": [lvg(y) for y in g_buy], "sell": [dict(lvg(y), keep=kp) for y, kp in zip(g_sell, keeps)], "basis": "plan"}
+        mode = "网格"
+        y_buy, y_sell = g_buy[0], g_sell[0]
+        buy_price, sell_price = dps / (y_buy / 100), dps / (y_sell / 100)
     if yg is None:
         yzone = None
     elif yg >= y_buy:
@@ -492,6 +548,19 @@ def build_stock(s, cfg, fx):
         yzone = "减仓区"
     else:
         yzone = "持有区"
+    # 股息率异常高：只提醒、不拦截（回测：自动拦截在两个账户结果相反）
+    anomaly = bool(yg and (yg > float(d.get("anomaly_gross", 8.0)) or (y_med and yg > 2 * y_med)))
+
+    # ---- 利润与自动评级 ----
+    profit = fetch_profit(s["code"], mk)
+    rating_auto = auto_rating(profit, dps)
+    if s.get("rating_lock"):
+        rating, rating_src = s["rating_lock"], "手动锁定"
+    elif rating_auto:
+        rating, rating_src = rating_auto, "自动"
+    else:
+        rating, rating_src = s.get("rating"), ("手动" if s.get("rating") else None)
+    dps_fwd = round(dps * (1 + profit["g"] / 100), 4) if profit and profit["g"] < -20 and dps > 0 else None
 
     # ---- 布林带 ----
     b_d = boll(h["adj"])
@@ -534,13 +603,11 @@ def build_stock(s, cfg, fx):
                     "dist": round((target / price - 1) * 100, 2) if target else None, "hit": hit}
         if hit:
             sig.append("计划触发：" + cond)
-            alert.append("计划触发：" + cond)
 
     near = float(d["boll_near_pct"])
     low = b_w is not None and price <= b_w[0] * (1 + near / 100)
     if yzone == "买入区":
         sig.append(f"买入区：股息率{'处于历史 ' + str(ypct) + ' 分位' if ypct is not None else ' ' + format(yn, '.2f') + '%'}")
-        alert.append(sig[-1])
     if low:
         dl = (price / b_w[0] - 1) * 100
         t = "周线跌破下轨" if dl < 0 else f"周线低位：距下轨 {dl:.1f}%"
@@ -548,13 +615,30 @@ def build_stock(s, cfg, fx):
     if yzone == "减仓区":
         t = f"减仓区：股息率{'处于历史 ' + str(ypct) + ' 分位' if ypct is not None else ' ' + format(yn, '.2f') + '%'}"
         sig.append(t)
-        alert.append(t)
     if b_w is not None and price >= b_w[2]:
         sig.append("周线突破上轨")
+    if anomaly and yzone == "买入区":
+        t = f"股息率异常高（税前 {yg:.1f}%）：先看最近财报和分红公告，确认分红不会减再买"
+        sig.append(t)
+    if dps_fwd is not None:
+        t = (f"利润大跌 {profit['g']:.0f}%（{profit['basis']}）：分红可能下调，按利润估算下一年分红约 {dps_fwd:.3g}，"
+             f"税前股息率约 {dps_fwd / price * 100:.1f}%")
+        sig.append(t)
+    # 波段网格（A/H 股，吴富贵原帖）：股息率跨过 5% / 5.5% / 6% 买一份，回到 5.5% / 5% / 4.5% 卖一份
+    if gridm and yg and yg_prev:
+        for L in g_buy:
+            if yg_prev < L <= yg:
+                alert.append(f"波段网格：税前股息率到 {L}%（约 {dps / (L / 100):.4g}），波段买一份")
+        for L in g_buy:
+            th = round(L - 0.5, 2)
+            if yg_prev > th >= yg:
+                alert.append(f"波段网格：税前股息率回到 {th}%（约 {dps / (th / 100):.4g}），{L}% 买的那份波段卖出")
 
     # ---- 滚动信号（波段仓）----
     # 买入第一笔：发给所有股票；第二笔 / 卖出 / 止损：只发给 watchlist 里 roll_holding 名单（正在做波段的）
     holding_roll = str(s["code"]) in {str(x) for x in (d.get("roll_holding") or [])}
+    if roll and gridm:
+        roll = None                      # A/H 股的波段用网格，不用滚动规则
     if roll:
         roll["holding"] = holding_roll
         if roll["new_buy"]:
@@ -569,17 +653,29 @@ def build_stock(s, cfg, fx):
                              "A 级且底仓这一档还没买够的，可以转入底仓不卖（看板上点“转入底仓”）")
 
     # ---- 波段 ----
-    sw = swing.analyze(h["dates"], h["adj"], cfg, s)
+    sw = None if gridm else swing.analyze(h["dates"], h["adj"], cfg, s)
     if sw and sw.get("active"):
         sig.append(f"波段：{sw['state']}（区间 {sw['lo']:.4g}–{sw['hi']:.4g}）")
         t = swing.alert_text(sw)
         if t:
             alert.append(t)
+    # ---- 给邮件用：到了第几档、能不能马上买 ----
+    nb = sum(1 for l in ladder["buy"] if yg and yg >= l["y"] - 1e-9) if ladder else 0
+    ns = sum(1 for l in ladder["sell"] if yg and yg <= l["y"] + 1e-9) if ladder else 0
+    wait = None
+    if nb:
+        if not gridm and b_w and price < b_w[0]:
+            wait = f"周线跌破布林下轨还在急跌，等收盘站回 {b_w[0]:.4g} 以上再买"
+        elif b_w and price > b_w[1]:
+            wait = f"价格在周线中轨上方，等跌回 {b_w[1]:.4g} 以下再买"
+        elif ma250 and price < ma250 and rating in ("B", "B-") and nb > 1:
+            wait = f"评级 {rating} 且在 250 日线下：只买第 1 档"
     # 周线跌破布林下轨（还在急跌）时不标“低位机会”，和分批建议的“等止跌”保持一致
-    star = yzone == "买入区" and (low or zone(price, b_w) == "下") and not (b_w and price < b_w[0])
+    wb = bool(b_w and price < b_w[0]) and not gridm          # 网格不等止跌（回测按原帖，不加这条）
+    star = yzone == "买入区" and (low or zone(price, b_w) == "下") and not wb
     if star:
         status = "低位机会"
-    elif yzone == "买入区" and b_w and price < b_w[0]:
+    elif yzone == "买入区" and wb:
         status = "急跌中"
     elif yzone == "减仓区" or zone(price, b_w) == "上":
         status = "高位观察"
@@ -601,7 +697,9 @@ def build_stock(s, cfg, fx):
         "dps": round(dps, 4), "dps_src": dps_src, "ttm": round(ttm, 4), "tax": tax, "dps_net": round(dps_net, 4),
         "yield": round(yn, 2) if yn is not None else None, "yield_gross": round(yg, 2) if yg is not None else None,
         "mode": mode, "ypct": ypct, "ypct5": ypct5, "hist_years": round(hist_years, 1), "win_years": win_years, "regime": regime, "src": h.get("src"),
-        "wbreak": bool(b_w and price < b_w[0]),
+        "wbreak": bool(b_w and price < b_w[0]) and not gridm, "kind": kind, "anomaly": anomaly,
+        "yield_prev": round(yg_prev, 3) if yg_prev else None, "profit": profit, "rating_src": rating_src,
+        "dps_fwd": dps_fwd, "nb": nb, "ns": ns, "wait": wait,
         "y_buy": round(y_buy, 2) if y_buy else None, "y_sell": round(y_sell, 2) if y_sell else None,
         "y_med": round(y_med, 2) if y_med else None,
         "buy_price": round(buy_price, 3) if buy_price else None, "sell_price": round(sell_price, 3) if sell_price else None,
@@ -613,7 +711,7 @@ def build_stock(s, cfg, fx):
         "yhist": [[x, round(y, 2)] for i, (x, y) in enumerate(yh_full) if i % stepf == 0 or i == len(yh_full) - 1],
         "divs_recent": [[x, round(v, 4)] for x, v in h["divs"][-12:]],
         "swing": sw, "roll": roll, "ma250": round(ma250, 4) if ma250 else None,
-        "below250": bool(ma250 and price < ma250), "rating": s.get("rating"),
+        "below250": bool(ma250 and price < ma250), "rating": rating,
     }
 
 
@@ -670,10 +768,72 @@ def send_mail(subject, html):
     print("邮件已发送 →", to)
 
 
+def transition_alerts(stocks, prev, d):
+    """底仓提醒只在“新情况”出现时发一次（和上一次的数据比）：
+    刚到新的一档、刚到减仓档（只发给 base_holding 名单）、刚出现股息异常 / 利润大跌、评级变化、计划刚触发。"""
+    hold = {str(x) for x in (d.get("base_holding") or [])}
+    for s in stocks:
+        pv = prev.get(s["code"])
+        if not pv or "nb" not in pv:          # 第一次运行新版本：只记下状态，不提醒
+            continue
+        L, new = s.get("ladder"), []
+        if s["nb"] > (pv.get("nb") or 0) and L:
+            lv = L["buy"][s["nb"] - 1]
+            basis = f"税前 {lv['y']}%" if s["mode"] == "网格" else ["历史中位数", "80 分位", "90 分位"][s["nb"] - 1]
+            new.append(f"底仓到第 {s['nb']} 档（{basis}，约 {lv['price']:.4g}）：" + (s["wait"] or "可以按看板建议买入"))
+        if s["ns"] > (pv.get("ns") or 0) and L and str(s["code"]) in hold:
+            lv = L["sell"][s["ns"] - 1]
+            new.append(f"底仓到减仓第 {s['ns']} 档（约 {lv['price']:.4g}）：按看板建议卖出")
+        if s.get("anomaly") and not pv.get("anomaly") and s.get("yzone") == "买入区":
+            new.append(f"股息率异常高（税前 {s['yield_gross']:.1f}%）：先看最近财报和分红公告，确认分红不会减再买")
+        if s.get("dps_fwd") and (not pv.get("dps_fwd") or (pv.get("profit") or {}).get("period") != (s.get("profit") or {}).get("period")):
+            new.append(f"利润大跌 {s['profit']['g']:.0f}%（{s['profit']['basis']}）：分红可能下调，"
+                       f"按利润估算税前股息率约 {s['dps_fwd'] / s['price'] * 100:.1f}%")
+        if pv.get("rating") and s.get("rating") and pv["rating"] != s["rating"]:
+            pr = s.get("profit") or {}
+            new.append(f"评级 {pv['rating']} → {s['rating']}" + (f"（利润{pr.get('basis', '')} {pr.get('g', 0):+.0f}%）" if pr else ""))
+        if (s.get("plan") or {}).get("hit") and not (pv.get("plan") or {}).get("hit"):
+            new.append("计划触发：" + s["plan"]["cond"])
+        s["alerts"] = new + s["alerts"]
+
+
+def weekly_summary(data):
+    """每周五附带一份周汇总，配合周六复盘。"""
+    d = data["defaults"]
+    hold = {str(x) for x in (d.get("base_holding") or [])}
+    roll = {str(x) for x in (d.get("roll_holding") or [])}
+    S = data["stocks"]
+    unit = {"CNY": "¥", "HKD": "HK$", "SGD": "S$"}
+    buy = sorted([s for s in S if s.get("nb")], key=lambda s: (-s["nb"], -(s.get("yield_gross") or 0)))
+    near = []
+    for s in S:
+        L = s.get("ladder")
+        if L and s["nb"] < len(L["buy"]):
+            p = L["buy"][s["nb"]]["price"]
+            if 0 < (1 - p / s["price"]) * 100 <= 3:
+                near.append((s, p))
+    sells = [s for s in S if s.get("ns") and str(s["code"]) in hold]
+    h = ["<h3>本周汇总</h3>"]
+    li = lambda xs: "<ul>" + "".join(f"<li>{x}</li>" for x in xs) + "</ul>" if xs else "<p>无</p>"
+    h.append(f"<p><b>在买入档的股票（{len(buy)} 只）</b></p>" + li(
+        [f"{s['name']} {s['code']}：第 {s['nb']} 档，税前 {s['yield_gross']:.2f}%" + (f"（{s['wait']}）" if s.get("wait") else "") for s in buy[:25]]))
+    h.append("<p><b>离下一档不到 3%</b></p>" + li([f"{s['name']}：现价 {unit[s['qccy']]}{s['price']:.4g}，下一档 {p:.4g}" for s, p in near]))
+    h.append("<p><b>持有中、到了减仓档</b>（按 base_holding 名单）</p>" + li([f"{s['name']}：减仓第 {s['ns']} 档" for s in sells]))
+    rs = [s for s in S if str(s["code"]) in roll]
+    h.append("<p><b>滚动波段持仓</b>（按 roll_holding 名单）</p>" + li(
+        [f"{s['name']}：" + ("到周线上轨，可卖" if (s.get("roll") or {}).get("sell") else "持有") for s in rs]))
+    return "\n".join(h)
+
+
 # ======================= 主流程 =======================
 def main():
     cfg = yaml.safe_load((HERE / "watchlist.yaml").read_text(encoding="utf-8"))
     fx = fetch_fx(cfg)
+    prev = {}
+    try:
+        prev = {x["code"]: x for x in json.loads(OUT.read_text(encoding="utf-8")).get("stocks", [])}
+    except Exception:
+        pass
     stocks, errors = [], []
     for s in cfg["stocks"]:
         try:
@@ -687,6 +847,7 @@ def main():
     if not stocks:
         raise SystemExit("全部获取失败")
     add_ah(stocks, fx)
+    transition_alerts(stocks, prev, cfg["defaults"])
 
     today = date.today().isoformat()
     latest = max(s["date"] for s in stocks)
@@ -704,10 +865,14 @@ def main():
         print("今天各市场都没有新数据（休市），不发邮件。")
         return
     html, n = mail_html(data)
+    weekly = datetime.now(SGT).weekday() == 4 or bool(os.getenv("WEEKLY"))
+    if weekly:
+        html += weekly_summary(data)
     if errors:
         html += "<p style='color:#c00'>获取失败：" + "；".join(x.split("：")[0] for x in errors) + "</p>"
-    if n or os.getenv("ALWAYS_SEND"):
-        send_mail(f"【红利提醒】{latest} {n} 只有信号" if n else f"【红利日报】{latest} 无信号", html)
+    if n or weekly or os.getenv("ALWAYS_SEND"):
+        title = f"【红利提醒】{latest} {n} 只有新信号" if n else f"【红利日报】{latest} 无新信号"
+        send_mail(title + ("（含周汇总）" if weekly else ""), html)
 
 
 if __name__ == "__main__":
