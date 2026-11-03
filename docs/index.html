@@ -244,7 +244,14 @@ function load(){
   return st;
 }
 let ST = load();
-const save = () => { try { localStorage.setItem(KEY, JSON.stringify(ST)); } catch(e){} };
+const persist = () => { try { localStorage.setItem(KEY, JSON.stringify(ST)); } catch(e){} };
+const save = () => { ST.updated = new Date().toISOString(); persist(); };   // 本机改动：打上时间，用来和仓库里的 holdings.json 比新旧
+let SYNC = "";   // 和仓库 holdings.json 的同步状态，显示在“配置”页
+function normST(v){
+  const st = v && v.holdings ? v : {holdings: v || {}};
+  st.cash ??= 0; st.targets ??= null; st.reviews ??= {}; st.swings ??= []; st.plans ??= {}; st.planPct ??= {}; st.peak ??= {}; st.cashLog ??= []; st.aCash ??= 0; st.rating ??= {};
+  return st;
+}
 
 const k = s => s.market + ":" + s.code;
 const $ = s => document.querySelector(s);
@@ -1008,8 +1015,8 @@ function viewAlloc(){
       <div class="card"><div class="card-h"><h2>个股占比</h2><span class="hint">上限 ${(DATA.limits||{}).stock||15}%</span></div><div class="bars">${bars(P.byStock)}</div></div>
       <div class="card"><div class="card-h"><h2>行业占比</h2><span class="hint">上限 ${(DATA.limits||{}).sector||35}%</span></div><div class="bars">${bars(Object.entries(P.bySec))}</div></div>
     </div>`:`<div class="card"><div class="empty">还没有录入持仓。到“持仓看板”点“录入持仓”。</div></div>`}
-    <div class="card"><div class="card-h"><h2>本机数据</h2><span class="hint">持仓、现金、目标、复盘笔记都只存在这台设备的浏览器。换设备时先导出，再在另一台导入。</span>
-      <div style="margin-left:auto;display:flex;gap:6px"><button class="btn" id="exp">导出</button><button class="btn" id="imp">导入</button></div></div></div>
+    <div class="card"><div class="card-h"><h2>持仓数据同步</h2><span class="hint">看板每次打开都会读取仓库 docs 里的 holdings.json（手机、电脑看到同一份）。在这台设备改了持仓后：点“导出”得到 holdings.json，上传到仓库 docs 文件夹覆盖，其他设备就会同步。</span>
+      <div style="margin-left:auto;display:flex;gap:6px"><button class="btn" id="exp">导出</button><button class="btn" id="imp">导入</button></div></div>${SYNC?`<div style="padding:0 16px 14px"><div class="warnbox ${SYNC.startsWith("✓")?"ok":"bad"}">${esc(SYNC)}</div></div>`:""}</div>
     <div class="note">换算汇率：1 CNY = S$${f(DATA.fx.CNY,4)} · 1 HKD = S$${f(DATA.fx.HKD,4)}</div>`;
 }
 
@@ -1155,7 +1162,7 @@ $("#dlg").addEventListener("close", ()=>{
 function exportAll(){
   const blob = new Blob([JSON.stringify(ST, null, 1)], {type:"application/json"});
   const a = document.createElement("a"); a.href = URL.createObjectURL(blob);
-  a.download = `红利看板数据-${new Date().toISOString().slice(0,10)}.json`; a.click();
+  a.download = "holdings.json"; a.click();
   setTimeout(()=>URL.revokeObjectURL(a.href), 1000);
 }
 $("#importFile").addEventListener("change", async e=>{
@@ -1163,8 +1170,7 @@ $("#importFile").addEventListener("change", async e=>{
   try {
     const v = JSON.parse(await file.text());
     if (v && typeof v === "object"){
-      ST = v.holdings ? v : {holdings: v};           // 兼容旧版只有持仓的导出
-      ST.cash ??= 0; ST.reviews ??= {}; ST.swings ??= []; ST.plans ??= {}; ST.planPct ??= {}; ST.peak ??= {}; ST.cashLog ??= []; save(); render();
+      ST = normST(v); save(); render();              // 兼容旧版只有持仓的导出
     }
   } catch(_) { $("#meta").textContent = "导入失败：文件格式不对"; }
   e.target.value = "";
@@ -1173,7 +1179,16 @@ $("#importFile").addEventListener("change", async e=>{
 try { TAB = localStorage.getItem("dividend-tab") || "board"; } catch(_){}
 if (!["board","low","swing","plan","alloc","review"].includes(TAB)) TAB = "board";
 document.querySelectorAll("button.tab").forEach(b=>b.classList.toggle("on", b.dataset.t===TAB));
-fetch("data.json?t=" + Date.now()).then(r=>r.json()).then(d=>{
+/* 仓库里的 holdings.json 比本机新（或本机没有数据）→ 用仓库的；本机更新 → 提醒上传 */
+const syncP = fetch("holdings.json?t=" + Date.now()).then(r=>r.ok ? r.json() : null).then(remote=>{
+  if (!remote) { SYNC = "仓库里还没有 holdings.json：点“导出”，把文件上传到仓库 docs 文件夹"; return; }
+  const ru = remote.updated || "", lu = ST.updated || "";
+  const hasLocal = Object.keys(ST.holdings||{}).length > 0;
+  if (!hasLocal || !lu || ru > lu){ ST = normST(remote); ST.updated = ru; persist(); SYNC = `✓ 已同步仓库里的持仓（${ru ? ru.slice(0,16).replace("T"," ") + " UTC" : "无时间"}）`; }
+  else if (ru === lu) SYNC = "✓ 本机和仓库的持仓一致";
+  else SYNC = "这台设备有改动还没上传：点“导出”，把 holdings.json 上传到仓库 docs 文件夹覆盖，其他设备才能看到";
+}).catch(()=>{});
+syncP.then(()=>fetch("data.json?t=" + Date.now())).then(r=>r.json()).then(d=>{
   DATA = d;
   $("#meta").textContent = `数据日期 ${d.date} · 更新于 ${d.updated}（新加坡时间）`;
   render();
