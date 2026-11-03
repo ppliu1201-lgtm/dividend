@@ -33,7 +33,7 @@ defaults:
   grid_buy: [5.0, 5.5, 6.0]
   grid_sell: [4.5, 4.0, 3.5]
   anomaly_gross: 8.0   # 税前股息率超过 8%（或超过自己中位数 2 倍）只提醒“先查分红”，不拦截
-  base_holding: []     # 你持有底仓的股票代码：到减仓档的邮件只发给这些（看板“周复盘”页会列出该填的代码）
+  base_holding: ["A17U", "CJLU", "G13", "M44U", "06823", "02318", "00902", "600096", "600461"]     # 你持有底仓的股票代码：到减仓档的邮件只发给这些（看板“周复盘”页会列出该填的代码）
   roll_holding: []     # 正在做滚动波段的股票代码，例如 ["00728", "D05"]。第二笔 / 卖出 / 止损邮件只发给这些（看板“波段”页会列出该填的代码）
   buy_yield: 5.0       # 历史不足时的备用规则（税后）
   sell_yield: 4.0
@@ -127,6 +127,7 @@ stocks:
   - {code: "00728", market: HK, name: 中国电信H,  sector: 电信, pair: "601728", lot: 2000, rating: "B"}
   - {code: "06690", market: HK, name: 海尔智家H, sector: 家电, pair: "600690", lot: 200, rating: "B"}
   - {code: "02318", market: HK, name: 中国平安H,  sector: 保险, pair: "601318", lot: 500, hist_years: 5, rating: "A+"}
+  - {code: "00902", market: HK, name: 华能国际电力H, sector: 电力, pair: "600011", lot: 2000}
   - {code: "00939", market: HK, name: 建设银行H,  sector: 银行, pair: "601939", lot: 1000}
   - {code: "01398", market: HK, name: 工商银行H,  sector: 银行, pair: "601398", lot: 1000}
   - {code: "03988", market: HK, name: 中国银行H,  sector: 银行, pair: "601988", lot: 1000}
