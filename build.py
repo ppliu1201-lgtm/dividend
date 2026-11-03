@@ -847,6 +847,14 @@ def weekly_summary(data):
 # ======================= 主流程 =======================
 def main():
     cfg = yaml.safe_load((HERE / "watchlist.yaml").read_text(encoding="utf-8"))
+    # 看板同步用的 docs/holdings.json 里有持仓的股票，自动算进 base_holding（减仓提醒发给这些）
+    try:
+        hj = json.loads((HERE / "docs" / "holdings.json").read_text(encoding="utf-8"))
+        held = [k.split(":", 1)[1] for k, v in (hj.get("holdings") or {}).items() if (v or {}).get("shares")]
+        d0 = cfg.setdefault("defaults", {})
+        d0["base_holding"] = sorted({str(x) for x in (d0.get("base_holding") or [])} | set(held))
+    except Exception:
+        pass
     fx = fetch_fx(cfg)
     prev = {}
     try:
