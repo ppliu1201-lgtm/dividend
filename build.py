@@ -874,7 +874,8 @@ def mail_html(data, hj=None):
         for s in hits:
             yl = "-" if s["yield"] is None else f"{s['yield']:.2f}%"
             act = s["code"] in buy_now and any(t.startswith(("底仓到第", "等待条件解除")) for t in s["alerts"])
-            h.append(f"<li{' style=\'color:#d00\'' if act else ''}><b>{'★ ' if s['star'] else ''}{s['name']} {s['code']}</b>（{s['bucket']}） "
+            red_attr = " style='color:#d00'" if act else ""
+            h.append(f"<li{red_attr}><b>{'★ ' if s['star'] else ''}{s['name']} {s['code']}</b>（{s['bucket']}） "
                      f"{unit[s['qccy']]}{s['price']:.2f}（{s['chg']:+.2f}%），税后股息率 {yl}<br>{'；'.join(s['alerts'])}</li>")
         h.append("</ul>")
     else:
