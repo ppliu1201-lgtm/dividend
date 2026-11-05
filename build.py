@@ -752,7 +752,89 @@ def add_ah(stocks, fx):
 
 
 # ======================= 邮件 =======================
-def mail_html(data):
+RATING_MUL = {"A+": 1.2, "A-": 1.0, "B": 0.5, "B-": 0.5}
+
+
+def buy_list(data, hj):
+    """按 docs/holdings.json（持仓、现金、计划占比）算出“现在按规则可以买”的全部股票和数量。
+    和看板的算法一致（每档 1/3、评级倍数、B 级在 250 日线下只买第 1 档、单只上限 15%），
+    但不含“部分额度 / 行业上限 / 现金垫”的分配，所以金额以看板为准。"""
+    if not hj:
+        return []
+    fx = data["fx"]
+    H = hj.get("holdings") or {}
+    key = lambda s: f"{s['market']}:{s['code']}"
+    mv = lambda s: (H.get(key(s)) or {}).get("shares", 0) * s["price"] * fx.get(s["qccy"], 1)
+    sg_total = float(hj.get("cash") or 0) + sum(mv(s) for s in data["stocks"] if s["market"] != "A")
+    a_total = float(hj.get("aCash") or 0) * fx.get("CNY", 0.19) + sum(mv(s) for s in data["stocks"] if s["market"] == "A")
+    cap = (data.get("limits") or {}).get("stock", 15)
+    out = []
+    for s in data["stocks"]:
+        w = s.get("wait") or ""
+        if not s.get("nb") or "等跌回" in w or "站回" in w:
+            continue
+        pct = min(float((hj.get("planPct") or {}).get(key(s)) or 0) * RATING_MUL.get(s.get("rating"), 1), cap)
+        if not pct:
+            continue
+        nb = 1 if "只买第 1 档" in w else s["nb"]
+        total = a_total if s["market"] == "A" else sg_total
+        gap = nb / 3 * pct / 100 * total - mv(s)
+        lot_v = s["lot"] * s["price"] * fx.get(s["qccy"], 1)
+        n = int(gap / lot_v + 0.3) * s["lot"] if lot_v else 0   # 不足 0.7 手就不买，避免超出计划太多
+        if gap <= 0 or n <= 0:
+            continue
+        held = (H.get(key(s)) or {}).get("shares", 0)
+        out.append((s, nb, n, n * s["price"], held))
+    out.sort(key=lambda x: -(x[0].get("ypct") or 0))
+    return out
+
+
+def _totals(data, hj):
+    fx, H = data["fx"], (hj.get("holdings") or {})
+    key = lambda s: f"{s['market']}:{s['code']}"
+    mv = lambda s: (H.get(key(s)) or {}).get("shares", 0) * s["price"] * fx.get(s["qccy"], 1)
+    sg = float(hj.get("cash") or 0) + sum(mv(s) for s in data["stocks"] if s["market"] != "A")
+    a = float(hj.get("aCash") or 0) * fx.get("CNY", 0.19) + sum(mv(s) for s in data["stocks"] if s["market"] == "A")
+    return key, sg, a
+
+
+def hold_report(data, hj):
+    """持仓逐只：到没到卖出档、卖多少、挂什么价；没到的给出离卖出档 / 下一个加仓档还有多远。"""
+    if not hj:
+        return [], []
+    key, sg_total, a_total = _totals(data, hj)
+    fx, H, peak = data["fx"], hj.get("holdings") or {}, hj.get("peak") or {}
+    cap = (data.get("limits") or {}).get("stock", 15)
+    sells, status = [], []
+    for s in data["stocks"]:
+        h = H.get(key(s)) or {}
+        sh = h.get("shares", 0)
+        L = s.get("ladder")
+        if not sh or not L:
+            continue
+        lot, px, f = s["lot"], s["price"], fx.get(s["qccy"], 1)
+        ns = s.get("ns") or 0
+        if ns:
+            lv = L["sell"][ns - 1]
+            if L.get("basis") == "plan":
+                pct = min(float((hj.get("planPct") or {}).get(key(s)) or 0) * RATING_MUL.get(s.get("rating"), 1), cap)
+                plan_v = pct / 100 * (a_total if s["market"] == "A" else sg_total)
+                keep = int(lv["keep"] * plan_v / (px * f) / lot) * lot
+                rule = f"减到计划的 {round(lv['keep'] * 3)}/3"
+            else:
+                pk = max(int(peak.get(key(s)) or sh), sh)
+                keep = int(lv["keep"] * pk / lot) * lot
+                rule = "卖掉一半" if lv["keep"] else "全部卖出"
+            n = max(0, sh - keep)
+            if n:
+                sells.append((s, ns, lv, n, keep, rule))
+        nxt_s = L["sell"][ns] if ns < len(L["sell"]) else None
+        nxt_b = L["buy"][s["nb"]] if s.get("nb", 0) < len(L["buy"]) else None
+        status.append((s, sh, h.get("cost"), ns, nxt_s, nxt_b))
+    return sells, status
+
+
+def mail_html(data, hj=None):
     hits = [s for s in data["stocks"] if s["alerts"]]
     hits.sort(key=lambda s: (not s["star"], s["yzone"] != "买入区", -(s["ypct"] or 0)))
     url = os.getenv("PAGE_URL", "")
@@ -767,6 +849,39 @@ def mail_html(data):
         h.append("</ul>")
     else:
         h.append("<p>今日无提醒信号。</p>")
+    sells, status = hold_report(data, hj)
+    if hj:
+        if sells:
+            h.append(f"<p><b>持仓到了卖出档</b>（{len(sells)} 只）：</p><ul>")
+            for s, ns, lv, n, keep, rule in sells:
+                h.append(f"<li><b>{s['name']} {s['code']}</b>：到减仓第 {ns} 档（股息率回落到 {lv['y']}%，约 {unit[s['qccy']]}{lv['price']:.4g}），"
+                         f"{rule} → <b>卖 {n:,} 股</b>，挂 {unit[s['qccy']]}{s['price']:.4g} 或以上；卖完剩 {keep:,} 股</li>")
+            h.append("</ul>")
+        else:
+            h.append("<p><b>持仓到了卖出档</b>：今天没有。</p>")
+        if status:
+            rows = []
+            for s, sh, cost, ns, nxt_s, nxt_b in status:
+                u = unit[s["qccy"]]
+                pl = f"{(s['price'] / cost - 1) * 100:+.1f}%" if cost else "-"
+                ts = f"{u}{nxt_s['price']:.4g}（还差 {(nxt_s['price'] / s['price'] - 1) * 100:+.1f}%）" if nxt_s else "已到最后一档"
+                tb = f"{u}{nxt_b['price']:.4g}（{(nxt_b['price'] / s['price'] - 1) * 100:+.1f}%）" if nxt_b else "已到最后一档"
+                if s.get("rating") in ("B", "B-") and s.get("below250"):
+                    tb = f"评级 {s['rating']}、在 250 日线下：暂停加仓"
+                rows.append(f"<tr><td>{s['name']}</td><td align=right>{sh:,}</td><td align=right>{u}{s['price']:.4g}</td>"
+                            f"<td align=right>{pl}</td><td>{ts}</td><td>{tb}</td></tr>")
+            h.append("<p><b>持仓一览</b></p><table border=1 cellpadding=4 cellspacing=0 style='border-collapse:collapse;font-size:13px'>"
+                     "<tr><th>股票</th><th>股数</th><th>现价</th><th>盈亏</th><th>下一个卖出档</th><th>下一个加仓档</th></tr>"
+                     + "".join(rows) + "</table>")
+    bl = buy_list(data, hj)
+    if hj and not bl:
+        h.append("<p><b>现在按规则可以买的</b>：今天没有。</p>")
+    if bl:
+        h.append(f"<p><b>现在按规则可以买的全部股票</b>（{len(bl)} 只，按今天收盘价；已扣掉现有持仓，金额以看板为准）：</p><ul>")
+        for s, nb, n, amt, held in bl:
+            h.append(f"<li>{s['name']} {s['code']}：第 {nb} 档，买 {n:,} 股，约 {unit[s['qccy']]}{amt:,.0f}"
+                     f"（挂 {unit[s['qccy']]}{s['price']:.4g} 或以下）" + (f"；已持有 {held:,} 股" if held else "") + "</li>")
+        h.append("</ul>")
     if url:
         h.append(f"<p><a href='{url}'>打开红利看板 →</a></p>")
     h.append("<p style='color:#888;font-size:12px'>仅为计划提醒，不构成投资建议。</p>")
@@ -897,14 +1012,27 @@ def main():
     if not any(s["date"] == today for s in stocks) and not os.getenv("FORCE"):
         print("今天各市场都没有新数据（休市），不发邮件。")
         return
-    html, n = mail_html(data)
+    try:
+        hj = json.loads((HERE / "docs" / "holdings.json").read_text(encoding="utf-8"))
+    except Exception:
+        hj = None
+    html, n = mail_html(data, hj)
+    # “可以买”的名单和上次运行不一样（有股票新进入可买、或等待条件解除）也发邮件，避免漏掉
+    try:
+        cur_b = {x[0]["code"] for x in buy_list(data, hj)}
+        old_b = {x[0]["code"] for x in buy_list(dict(data, stocks=[v for v in prev.values() if "nb" in v]), hj)} if prev else cur_b
+        new_b = cur_b - old_b
+    except Exception:
+        new_b = set()
     weekly = datetime.now(SGT).weekday() == 4 or bool(os.getenv("WEEKLY"))
     if weekly:
         html += weekly_summary(data)
     if errors:
         html += "<p style='color:#c00'>获取失败：" + "；".join(x.split("：")[0] for x in errors) + "</p>"
-    if n or weekly or os.getenv("ALWAYS_SEND"):
-        title = f"【红利提醒】{latest} {n} 只有新信号" if n else f"【红利日报】{latest} 无新信号"
+    n_sell = len(hold_report(data, hj)[0]) if hj else 0
+    if True:   # 每个交易日都发：附持仓卖出档和可买清单
+        parts = ([f"{n} 只新信号"] if n else []) + ([f"新增可买 {len(new_b)} 只"] if new_b else []) + ([f"持仓到卖出档 {n_sell} 只"] if n_sell else [])
+        title = f"【红利{'提醒' if parts else '日报'}】{latest} " + ("，".join(parts) if parts else "无新信号")
         send_mail(title + ("（含周汇总）" if weekly else ""), html)
 
 
