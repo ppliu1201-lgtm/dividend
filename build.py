@@ -755,7 +755,7 @@ def add_ah(stocks, fx):
 RATING_MUL = {"A+": 1.2, "A-": 1.0, "B": 0.5, "B-": 0.5}
 
 
-def buy_list(data, hj):
+def buy_list(data, hj, waiting=False):
     """按 docs/holdings.json（持仓、现金、计划占比）算出“现在按规则可以买”的全部股票和数量。
     和看板的算法一致（每档 1/3、评级倍数、B 级在 250 日线下只买第 1 档、单只上限 15%），
     但不含“部分额度 / 行业上限 / 现金垫”的分配，所以金额以看板为准。"""
@@ -771,12 +771,13 @@ def buy_list(data, hj):
     out = []
     for s in data["stocks"]:
         w = s.get("wait") or ""
-        if not s.get("nb") or "等跌回" in w or "站回" in w:
+        blocked = "等跌回" in w or "站回" in w
+        if not s.get("nb") or blocked != waiting:
             continue
         pct = min(float((hj.get("planPct") or {}).get(key(s)) or 0) * RATING_MUL.get(s.get("rating"), 1), cap)
         if not pct:
             continue
-        nb = 1 if "只买第 1 档" in w else s["nb"]
+        nb = 1 if ("只买第 1 档" in w or (s.get("rating") in ("B", "B-") and s.get("below250"))) else s["nb"]
         total = a_total if s["market"] == "A" else sg_total
         gap = nb / 3 * pct / 100 * total - mv(s)
         lot_v = s["lot"] * s["price"] * fx.get(s["qccy"], 1)
@@ -784,7 +785,7 @@ def buy_list(data, hj):
         if gap <= 0 or n <= 0:
             continue
         held = (H.get(key(s)) or {}).get("shares", 0)
-        out.append((s, nb, n, n * s["price"], held))
+        out.append((s, nb, n, n * s["price"], held, w))
     out.sort(key=lambda x: -(x[0].get("ypct") or 0))
     return out
 
@@ -829,7 +830,11 @@ def hold_report(data, hj):
             if n:
                 sells.append((s, ns, lv, n, keep, rule))
         nxt_s = L["sell"][ns] if ns < len(L["sell"]) else None
-        nxt_b = L["buy"][s["nb"]] if s.get("nb", 0) < len(L["buy"]) else None
+        # 下一个加仓档按“已经买到第几档”算（持仓市值 ÷ 每档金额），不是按今天的股息率
+        pct = min(float((hj.get("planPct") or {}).get(key(s)) or 0) * RATING_MUL.get(s.get("rating"), 1), cap)
+        plan_v = pct / 100 * (a_total if s["market"] == "A" else sg_total)
+        bought = min(len(L["buy"]), int(sh * px * f / (plan_v / 3) + 0.5)) if plan_v else 0
+        nxt_b = L["buy"][bought] if bought < len(L["buy"]) else None
         status.append((s, sh, h.get("cost"), ns, nxt_s, nxt_b))
     return sells, status
 
@@ -865,7 +870,7 @@ def mail_html(data, hj=None):
                 u = unit[s["qccy"]]
                 pl = f"{(s['price'] / cost - 1) * 100:+.1f}%" if cost else "-"
                 ts = f"{u}{nxt_s['price']:.4g}（还差 {(nxt_s['price'] / s['price'] - 1) * 100:+.1f}%）" if nxt_s else "已到最后一档"
-                tb = f"{u}{nxt_b['price']:.4g}（{(nxt_b['price'] / s['price'] - 1) * 100:+.1f}%）" if nxt_b else "已到最后一档"
+                tb = f"{u}{nxt_b['price']:.4g}（{(nxt_b['price'] / s['price'] - 1) * 100:+.1f}%）" if nxt_b else "已买满三档"
                 if s.get("rating") in ("B", "B-") and s.get("below250"):
                     tb = f"评级 {s['rating']}、在 250 日线下：暂停加仓"
                 rows.append(f"<tr><td>{s['name']}</td><td align=right>{sh:,}</td><td align=right>{u}{s['price']:.4g}</td>"
@@ -878,9 +883,17 @@ def mail_html(data, hj=None):
         h.append("<p><b>现在按规则可以买的</b>：今天没有。</p>")
     if bl:
         h.append(f"<p><b>现在按规则可以买的全部股票</b>（{len(bl)} 只，按今天收盘价；已扣掉现有持仓，金额以看板为准）：</p><ul>")
-        for s, nb, n, amt, held in bl:
+        for s, nb, n, amt, held, _ in bl:
             h.append(f"<li>{s['name']} {s['code']}：第 {nb} 档，买 {n:,} 股，约 {unit[s['qccy']]}{amt:,.0f}"
                      f"（挂 {unit[s['qccy']]}{s['price']:.4g} 或以下）" + (f"；已持有 {held:,} 股" if held else "") + "</li>")
+        h.append("</ul>")
+    wl = buy_list(data, hj, waiting=True)
+    if wl:
+        h.append(f"<p><b>已到档、等价格回落</b>（{len(wl)} 只；“等跌回”的可以提前按该价挂限价单，“急跌中”的要等收盘站回再买）：</p><ul>")
+        for s, nb, n, amt, held, w in wl:
+            h.append(f"<li>{s['name']} {s['code']}：第 {nb} 档，买 {n:,} 股，约 {unit[s['qccy']]}{amt:,.0f}；{w}"
+                     + ("；⚠ 股息率异常，先核实" if s.get("anomaly") else "")
+                     + (f"；已持有 {held:,} 股" if held else "") + "</li>")
         h.append("</ul>")
     if url:
         h.append(f"<p><a href='{url}'>打开红利看板 →</a></p>")
