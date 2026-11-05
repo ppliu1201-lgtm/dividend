@@ -800,6 +800,12 @@ def transition_alerts(stocks, prev, d):
             lv = L["buy"][s["nb"] - 1]
             basis = f"税前 {lv['y']}%" if s["mode"] == "网格" else ["历史中位数", "80 分位", "90 分位"][s["nb"] - 1]
             new.append(f"底仓到第 {s['nb']} 档（{basis}，约 {lv['price']:.4g}）：" + (s["wait"] or "可以按看板建议买入"))
+        # 早就到档、但一直在“等跌回中轨 / 等站回下轨”，今天等待条件解除了 → 提醒可以买
+        blocking = lambda w: bool(w) and ("等跌回" in w or "站回" in w)
+        if s["nb"] > 0 and s["nb"] == (pv.get("nb") or 0) and blocking(pv.get("wait")) and not blocking(s.get("wait")) and L:
+            lv = L["buy"][s["nb"] - 1]
+            new.append(f"等待条件解除，第 {s['nb']} 档现在可以买（现价 {s['price']:.4g}，已回到周线中轨以下 / 已止跌）："
+                       + (s["wait"] or "按看板建议买入"))
         if s["ns"] > (pv.get("ns") or 0) and L and str(s["code"]) in hold:
             lv = L["sell"][s["ns"] - 1]
             new.append(f"底仓到减仓第 {s['ns']} 档（约 {lv['price']:.4g}）：按看板建议卖出")
