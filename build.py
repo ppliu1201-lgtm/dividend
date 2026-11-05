@@ -782,9 +782,9 @@ def buy_list(data, hj, waiting=False):
         gap = nb / 3 * pct / 100 * total - mv(s)
         lot_v = s["lot"] * s["price"] * fx.get(s["qccy"], 1)
         n = int(gap / lot_v + 0.3) * s["lot"] if lot_v else 0   # 不足 0.7 手就不买，避免超出计划太多
-        if gap <= 0 or n <= 0:
-            continue
         held = (H.get(key(s)) or {}).get("shares", 0)
+        if gap <= 0 or n <= 0 or (held and gap < 0.25 * pct / 100 * total / 3):   # 已持有的，差额不到一档的 1/4 就不补
+            continue
         out.append((s, nb, n, n * s["price"], held, w))
     out.sort(key=lambda x: -(x[0].get("ypct") or 0))
     return out
@@ -835,11 +835,34 @@ def hold_report(data, hj):
         plan_v = pct / 100 * (a_total if s["market"] == "A" else sg_total)
         bought = min(len(L["buy"]), int(sh * px * f / (plan_v / 3) + 0.5)) if plan_v else 0
         nxt_b = L["buy"][bought] if bought < len(L["buy"]) else None
-        status.append((s, sh, h.get("cost"), ns, nxt_s, nxt_b))
+        w = s.get("wait") or ""
+        eff = 1 if (s.get("rating") in ("B", "B-") and s.get("below250")) else (s.get("nb") or 0)
+        need_add = eff > bought and not ("等跌回" in w or "站回" in w)
+        status.append((s, sh, h.get("cost"), ns, nxt_s, nxt_b, need_add))
     return sells, status
 
 
+def bought_levels(s, hj, totals):
+    """已经买到第几档：持仓市值 ÷ 每档金额（计划的 1/3），四舍五入。"""
+    key, sg_total, a_total = totals
+    sh = ((hj.get("holdings") or {}).get(key(s)) or {}).get("shares", 0)
+    if not sh:
+        return 0
+    pct = float((hj.get("planPct") or {}).get(key(s)) or 0) * RATING_MUL.get(s.get("rating"), 1)
+    plan_v = pct / 100 * (a_total if s["market"] == "A" else sg_total)
+    return int(sh * s["price"] * s["fx"] / (plan_v / 3) + 0.5) if plan_v else 3
+
+
 def mail_html(data, hj=None):
+    # 已经买到（或超过）这一档的持仓，不再提醒“到第 n 档 / 等待解除可以买”
+    if hj:
+        totals = _totals(data, hj)
+        for s in data["stocks"]:
+            if not s.get("alerts") or not s.get("nb"):
+                continue
+            eff = 1 if (s.get("rating") in ("B", "B-") and s.get("below250")) else s["nb"]
+            if bought_levels(s, hj, totals) >= eff:
+                s["alerts"] = [t for t in s["alerts"] if not (t.startswith("底仓到第") or t.startswith("等待条件解除"))]
     hits = [s for s in data["stocks"] if s["alerts"]]
     hits.sort(key=lambda s: (not s["star"], s["yzone"] != "买入区", -(s["ypct"] or 0)))
     url = os.getenv("PAGE_URL", "")
@@ -847,9 +870,11 @@ def mail_html(data, hj=None):
     h = [f"<h3>三地红利看板 · {data['date']}</h3>"]
     if hits:
         h.append(f"<p>今日 <b>{len(hits)}</b> 只出现信号：</p><ul>")
+        buy_now = {x[0]["code"] for x in buy_list(data, hj)} if hj else set()
         for s in hits:
             yl = "-" if s["yield"] is None else f"{s['yield']:.2f}%"
-            h.append(f"<li><b>{'★ ' if s['star'] else ''}{s['name']} {s['code']}</b>（{s['bucket']}） "
+            act = s["code"] in buy_now and any(t.startswith(("底仓到第", "等待条件解除")) for t in s["alerts"])
+            h.append(f"<li{' style=\'color:#d00\'' if act else ''}><b>{'★ ' if s['star'] else ''}{s['name']} {s['code']}</b>（{s['bucket']}） "
                      f"{unit[s['qccy']]}{s['price']:.2f}（{s['chg']:+.2f}%），税后股息率 {yl}<br>{'；'.join(s['alerts'])}</li>")
         h.append("</ul>")
     else:
@@ -859,21 +884,28 @@ def mail_html(data, hj=None):
         if sells:
             h.append(f"<p><b>持仓到了卖出档</b>（{len(sells)} 只）：</p><ul>")
             for s, ns, lv, n, keep, rule in sells:
-                h.append(f"<li><b>{s['name']} {s['code']}</b>：到减仓第 {ns} 档（股息率回落到 {lv['y']}%，约 {unit[s['qccy']]}{lv['price']:.4g}），"
+                h.append(f"<li style='color:#d00'><b>{s['name']} {s['code']}</b>：到减仓第 {ns} 档（股息率回落到 {lv['y']}%，约 {unit[s['qccy']]}{lv['price']:.4g}），"
                          f"{rule} → <b>卖 {n:,} 股</b>，挂 {unit[s['qccy']]}{s['price']:.4g} 或以上；卖完剩 {keep:,} 股</li>")
             h.append("</ul>")
         else:
             h.append("<p><b>持仓到了卖出档</b>：今天没有。</p>")
         if status:
             rows = []
-            for s, sh, cost, ns, nxt_s, nxt_b in status:
+            sold = {x[0]["code"] for x in sells}
+            for s, sh, cost, ns, nxt_s, nxt_b, need_add in status:
                 u = unit[s["qccy"]]
                 pl = f"{(s['price'] / cost - 1) * 100:+.1f}%" if cost else "-"
                 ts = f"{u}{nxt_s['price']:.4g}（还差 {(nxt_s['price'] / s['price'] - 1) * 100:+.1f}%）" if nxt_s else "已到最后一档"
                 tb = f"{u}{nxt_b['price']:.4g}（{(nxt_b['price'] / s['price'] - 1) * 100:+.1f}%）" if nxt_b else "已买满三档"
                 if s.get("rating") in ("B", "B-") and s.get("below250"):
                     tb = f"评级 {s['rating']}、在 250 日线下：暂停加仓"
-                rows.append(f"<tr><td>{s['name']}</td><td align=right>{sh:,}</td><td align=right>{u}{s['price']:.4g}</td>"
+                red = s["code"] in sold or need_add
+                if need_add:
+                    tb = f"现在可以加仓（第 {s['nb']} 档），见下方可买清单"
+                if s["code"] in sold:
+                    ts = f"已到减仓第 {ns} 档，见上方卖出提醒"
+                st_ = " style='color:#d00;font-weight:bold'" if red else ""
+                rows.append(f"<tr{st_}><td>{s['name']} <span style='color:#666'>{s['code']}</span></td><td align=right>{sh:,}</td><td align=right>{u}{s['price']:.4g}</td>"
                             f"<td align=right>{pl}</td><td>{ts}</td><td>{tb}</td></tr>")
             h.append("<p><b>持仓一览</b></p><table border=1 cellpadding=4 cellspacing=0 style='border-collapse:collapse;font-size:13px'>"
                      "<tr><th>股票</th><th>股数</th><th>现价</th><th>盈亏</th><th>下一个卖出档</th><th>下一个加仓档</th></tr>"
@@ -884,7 +916,7 @@ def mail_html(data, hj=None):
     if bl:
         h.append(f"<p><b>现在按规则可以买的全部股票</b>（{len(bl)} 只，按今天收盘价；已扣掉现有持仓，金额以看板为准）：</p><ul>")
         for s, nb, n, amt, held, _ in bl:
-            h.append(f"<li>{s['name']} {s['code']}：第 {nb} 档，买 {n:,} 股，约 {unit[s['qccy']]}{amt:,.0f}"
+            h.append(f"<li style='color:#d00;font-weight:bold'>{s['name']} {s['code']}：第 {nb} 档，买 {n:,} 股，约 {unit[s['qccy']]}{amt:,.0f}"
                      f"（挂 {unit[s['qccy']]}{s['price']:.4g} 或以下）" + (f"；已持有 {held:,} 股" if held else "") + "</li>")
         h.append("</ul>")
     wl = buy_list(data, hj, waiting=True)
