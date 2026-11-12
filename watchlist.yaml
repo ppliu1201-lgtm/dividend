@@ -104,7 +104,7 @@ stocks:
   - {code: "A17U", market: SG, name: 凯德腾飞信托 CLAR,     sector: 房地产信托}
   - {code: "ME8U", market: SG, name: 丰树工业信托 MINT,     sector: 房地产信托}
   - {code: "M44U", market: SG, name: 丰树物流信托 MLT,      sector: 房地产信托}
-  - {code: "BUOU", market: SG, name: 辉盛物流工业信托 FLCT,  sector: 房地产信托}
+  - {code: "BUOU", market: SG, name: 辉盛物流工业信托 FLCT,  sector: 房地产信托, rating_lock: "A-"}   # FY2026 DPU 5.90 分基本持平；净利润大跌是 1.7 亿重估亏损（非现金），手动锁定
   - {code: "AJBU", market: SG, name: 吉宝数据中心 Keppel DC, sector: 房地产信托, dps: 0.1096}   # 手动：2H25 5.248 分 + 1H26 5.714 分（有预付分红，自动算会偏高）；下次业绩后更新
   - {code: "C2PU", market: SG, name: 百汇生命 PLife REIT,   sector: 房地产信托}
   - {code: "HMN",  market: SG, name: 凯德雅诗阁信托 CLAS,   sector: 房地产信托}
@@ -132,7 +132,7 @@ stocks:
   - {code: "01398", market: HK, name: 工商银行H,  sector: 银行, pair: "601398", lot: 1000}
   - {code: "03988", market: HK, name: 中国银行H,  sector: 银行, pair: "601988", lot: 1000}
   - {code: "03968", market: HK, name: 招商银行H,  sector: 银行, pair: "600036", lot: 500, hist_years: 5, rating: "A-"}
-  - {code: "00883", market: HK, name: 中国海洋石油, sector: 能源, pair: "600938", lot: 1000, tag: 周期}
+  - {code: "00883", market: HK, name: 中国海洋石油, sector: 能源, pair: "600938", lot: 1000, tag: 周期, rating_lock: "A+"}   # 2026 上半年净利润 +23.4%，Yahoo 季报缺失只能拿到 2025 全年，手动锁定
   - {code: "00857", market: HK, name: 中国石油H,  sector: 能源, pair: "601857", lot: 2000, tag: 周期}
   - {code: "00386", market: HK, name: 中国石化H,  sector: 能源, pair: "600028", lot: 2000, tag: 周期}
   - {code: "01088", market: HK, name: 中国神华H,  sector: 能源, pair: "601088", lot: 500,  tag: 周期}

@@ -11,6 +11,7 @@
 环境变量：SMTP_USER / SMTP_PASS / MAIL_TO / ALWAYS_SEND / PAGE_URL / MOCK=1（模拟数据）
 """
 import json
+import re
 import os
 import random
 import smtplib
@@ -753,6 +754,13 @@ def add_ah(stocks, fx):
 
 # ======================= 邮件 =======================
 RATING_MUL = {"A+": 1.2, "A-": 1.0, "B": 0.5, "B-": 0.5}
+NEAR = {"SG": 0.02, "HK": 0.03, "A": 0.03}   # 离档位多近算“快到了”（标绿，方便提前挂单）：新加坡 2%，港股 / A股 3%
+GREEN = " style='color:#080;font-weight:bold'"
+
+
+def near(s, target):
+    """目标价离现价在 NEAR 以内（买点在下方、卖点在上方都算）。"""
+    return bool(target) and abs(target / s["price"] - 1) <= NEAR.get(s["market"], 0.02)
 
 
 def buy_list(data, hj, waiting=False):
@@ -901,6 +909,10 @@ def mail_html(data, hj=None):
                 if s.get("rating") in ("B", "B-") and s.get("below250"):
                     tb = f"评级 {s['rating']}、在 250 日线下：暂停加仓"
                 red = s["code"] in sold or need_add
+                if not red and nxt_s and near(s, nxt_s["price"]):
+                    ts = f"<span{GREEN}>{ts} 快到了</span>"
+                if not red and nxt_b and near(s, nxt_b["price"]) and "暂停加仓" not in tb:
+                    tb = f"<span{GREEN}>{tb} 快到了</span>"
                 if need_add:
                     tb = f"现在可以加仓（第 {s['nb']} 档），见下方可买清单"
                 if s["code"] in sold:
@@ -924,10 +936,26 @@ def mail_html(data, hj=None):
     if wl:
         h.append(f"<p><b>已到档、等价格回落</b>（{len(wl)} 只；“等跌回”的可以提前按该价挂限价单，“急跌中”的要等收盘站回再买）：</p><ul>")
         for s, nb, n, amt, held, w in wl:
-            h.append(f"<li>{s['name']} {s['code']}：第 {nb} 档，买 {n:,} 股，约 {unit[s['qccy']]}{amt:,.0f}；{w}"
+            m = re.search(r"(?:跌回|站回)\s*([\d.]+)", w)
+            g = GREEN if (m and near(s, float(m.group(1)))) else ""
+            h.append(f"<li{g}>{s['name']} {s['code']}：第 {nb} 档，买 {n:,} 股，约 {unit[s['qccy']]}{amt:,.0f}；{w}"
                      + ("；⚠ 股息率异常，先核实" if s.get("anomaly") else "")
                      + (f"；已持有 {held:,} 股" if held else "") + "</li>")
         h.append("</ul>")
+    if hj:
+        H = hj.get("holdings") or {}
+        nl = []
+        for s in data["stocks"]:
+            L = s.get("ladder")
+            if not L or s.get("nb") or (H.get(f"{s['market']}:{s['code']}") or {}).get("shares"):
+                continue
+            t = L["buy"][0]["price"]
+            if t < s["price"] and near(s, t):
+                nl.append(f"<li{GREEN}>{s['name']} {s['code']}（{s.get('rating') or '-'}）：现价 {unit[s['qccy']]}{s['price']:.4g}，"
+                          f"第 1 档 {unit[s['qccy']]}{t:.4g}（还差 {(t / s['price'] - 1) * 100:.1f}%）"
+                          + ("；⚠ 股息率异常" if s.get("anomaly") else "") + "</li>")
+        if nl:
+            h.append(f"<p><b>快到第 1 档</b>（{len(nl)} 只，未持有；新加坡 2% / 港股、A股 3% 以内，可以提前挂单）：</p><ul>" + "".join(nl) + "</ul>")
     if url:
         h.append(f"<p><a href='{url}'>打开红利看板 →</a></p>")
     h.append("<p style='color:#888;font-size:12px'>仅为计划提醒，不构成投资建议。</p>")
