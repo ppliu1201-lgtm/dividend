@@ -815,6 +815,7 @@ def hold_report(data, hj):
     fx, H, peak = data["fx"], hj.get("holdings") or {}, hj.get("peak") or {}
     cap = (data.get("limits") or {}).get("stock", 15)
     sells, status = [], []
+    buy_now = {x[0]["code"] for x in buy_list(data, hj)}
     for s in data["stocks"]:
         h = H.get(key(s)) or {}
         sh = h.get("shares", 0)
@@ -845,7 +846,8 @@ def hold_report(data, hj):
         nxt_b = L["buy"][bought] if bought < len(L["buy"]) else None
         w = s.get("wait") or ""
         eff = 1 if (s.get("rating") in ("B", "B-") and s.get("below250")) else (s.get("nb") or 0)
-        need_add = eff > bought and not ("等跌回" in w or "站回" in w)
+        # 和可买清单一致：差额凑得出一手才算“现在可以加仓”（中海油一手就超出计划，不再标红）
+        need_add = eff > bought and not ("等跌回" in w or "站回" in w) and s["code"] in buy_now
         status.append((s, sh, h.get("cost"), ns, nxt_s, nxt_b, need_add))
     return sells, status
 

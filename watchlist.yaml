@@ -136,7 +136,7 @@ stocks:
   - {code: "00857", market: HK, name: 中国石油H,  sector: 能源, pair: "601857", lot: 2000, tag: 周期}
   - {code: "00386", market: HK, name: 中国石化H,  sector: 能源, pair: "600028", lot: 2000, tag: 周期}
   - {code: "01088", market: HK, name: 中国神华H,  sector: 能源, pair: "601088", lot: 500,  tag: 周期}
-  - {code: "00177", market: HK, name: 江苏宁沪高速, sector: 交通基建, pair: "600377", lot: 2000}
+  - {code: "00177", market: HK, name: 江苏宁沪高速, sector: 交通基建, pair: "600377", lot: 2000, dps: 0.62}   # 手动：2026 年首次加派中期 RMB0.25（HK$0.29），近12月会把 2025 末期 + 2026 中期算成一年；按全年约 HK$0.62 估，2026 末期公布后更新
   - {code: "00548", market: HK, name: 深圳高速H,  sector: 交通基建, pair: "600548", lot: 2000}
   - {code: "00144", market: HK, name: 招商局港口, sector: 交通基建}
 
